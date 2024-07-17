@@ -68,7 +68,8 @@ class WorkerBase(ABC):
     @abstractmethod
     def execute_model(
         self,
-        execute_model_req: Optional[ExecuteModelRequest] = None
+        execute_model_req: Optional[ExecuteModelRequest] = None,
+        do_no_processor: bool = None,
     ) -> Optional[List[SamplerOutput]]:
         raise NotImplementedError
 
@@ -214,7 +215,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
     def execute_model(
         self,
-        execute_model_req: Optional[ExecuteModelRequest] = None
+        execute_model_req: Optional[ExecuteModelRequest] = None,
+        do_no_processor: bool = None,
     ) -> Optional[List[SamplerOutput]]:
         """Executes at least one model step on the given sequences, unless no
         sequences are provided."""
@@ -271,11 +273,14 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         output = self.model_runner.execute_model(
             model_input, self.kv_cache[worker_input.virtual_engine]
             if self.kv_cache is not None else None, intermediate_tensors,
-            num_steps)
+            num_steps, do_no_processor)
 
         if not get_pp_group().is_last_rank:
             get_pp_group().send_tensor_dict(output.tensors)
             return [None]
+
+        if do_no_processor is not None:
+            return output, model_input
 
         # Worker only supports single-step execution. Wrap the output in a
         # list to conform to interface.
