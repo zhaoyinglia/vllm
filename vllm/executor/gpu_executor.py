@@ -58,6 +58,7 @@ class GPUExecutor(ExecutorBase):
             multimodal_config=self.multimodal_config,
             speculative_config=self.speculative_config,
             prompt_adapter_config=self.prompt_adapter_config,
+            classifier_free_guidance_config=self.classifier_free_guidance_config,
             is_driver_worker=(not self.parallel_config)
             or (rank % self.parallel_config.tensor_parallel_size == 0),
         )
@@ -69,13 +70,17 @@ class GPUExecutor(ExecutorBase):
             distributed_init_method: Optional[str] = None) -> Dict:
         worker_kwargs = self._get_worker_kwargs(local_rank, rank,
                                                 distributed_init_method)
-        if self.speculative_config is None:
+        if self.speculative_config is None and self.classifier_free_guidance_config is None:
             worker_kwargs.update(worker_module_name="vllm.worker.worker",
                                  worker_class_name="Worker")
-        else:
+        elif self.speculative_config is not None:
             worker_kwargs.update(
                 worker_module_name="vllm.spec_decode.spec_decode_worker",
                 worker_class_name="create_spec_worker")
+        else:
+            worker_kwargs.update(
+                worker_module_name="vllm.classifier_free_guidance.cfg_worker",
+                worker_class_name="create_cfg_worker")
         return worker_kwargs
 
     def _create_worker(self,
