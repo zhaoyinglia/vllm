@@ -108,6 +108,7 @@ class ScheduledSequenceGroup:
     # 1 for decoding. Same as prompt tokens for prefill, but if prefill is
     # chunked, it can be smaller than that.
     token_chunk_size: int
+    negative_token_chunk_size: int = 0
 
 
 @dataclass
@@ -288,7 +289,7 @@ def scheduler_running_outputs_builder():
 
 
 def scheduled_seq_group_builder():
-    return ScheduledSequenceGroup(seq_group=None, token_chunk_size=0)
+    return ScheduledSequenceGroup(seq_group=None, token_chunk_size=0, negative_token_chunk_size=0)
 
 
 class Scheduler:
@@ -514,8 +515,8 @@ class Scheduler:
 
         while running_queue:
             seq_group = running_queue[0]
-            num_running_tokens = self._get_num_new_tokens(
-                seq_group, SequenceStatus.RUNNING, enable_chunking, budget)
+            num_running_tokens, negative_num_running_tokens = self._get_num_new_tokens(
+                seq_group, SequenceStatus.RUNNING, enable_chunking, budget, return_negative=True)
 
             if num_running_tokens == 0:
                 break
@@ -523,7 +524,7 @@ class Scheduler:
             running_queue.popleft()
             while not self._can_append_slots(seq_group):
                 budget.subtract_num_batched_tokens(seq_group.request_id,
-                                                   num_running_tokens)
+                                                   num_running_tokens + negative_num_running_tokens)
                 num_running_seqs = seq_group.get_max_num_running_seqs()
                 budget.subtract_num_seqs(seq_group.request_id,
                                          num_running_seqs)
@@ -560,15 +561,17 @@ class Scheduler:
                 scheduled_seq_group.seq_group = seq_group
                 if is_prefill:
                     scheduled_seq_group.token_chunk_size = num_running_tokens
+                    scheduled_seq_group.negative_token_chunk_size = negative_num_running_tokens
                     prefill_seq_groups.append(scheduled_seq_group)
                     ret.prefill_seq_groups_list.append(seq_group)
                 else:
                     scheduled_seq_group.token_chunk_size = 1
+                    scheduled_seq_group.negative_token_chunk_size = 1
                     decode_seq_groups.append(scheduled_seq_group)
                     ret.decode_seq_groups_list.append(seq_group)
 
                 budget.add_num_batched_tokens(seq_group.request_id,
-                                              num_running_tokens)
+                                              num_running_tokens + negative_num_running_tokens)
                 # OPTIMIZATION:  Note that get_max_num_running_seqs is
                 # expensive. For the default scheduling chase where
                 # enable_chunking is False, num_seqs are updated before running
@@ -655,12 +658,11 @@ class Scheduler:
             # The total number of sequences in the RUNNING state should not
             # exceed the maximum number of sequences.
             num_new_seqs = seq_group.get_max_num_running_seqs()
-            num_new_tokens = self._get_num_new_tokens(seq_group,
-                                                      SequenceStatus.SWAPPED,
-                                                      enable_chunking, budget)
+            num_new_tokens, negative_num_new_tokens = self._get_num_new_tokens(
+                seq_group, SequenceStatus.SWAPPED, enable_chunking, budget, return_negative=False)
 
             if (num_new_tokens == 0
-                    or not budget.can_schedule(num_new_tokens=num_new_tokens,
+                    or not budget.can_schedule(num_new_tokens=num_new_tokens + negative_num_new_tokens,
                                                num_new_seqs=num_new_seqs)):
                 break
 
@@ -673,11 +675,12 @@ class Scheduler:
             if is_prefill:
                 prefill_seq_groups.append(
                     ScheduledSequenceGroup(seq_group,
-                                           token_chunk_size=num_new_tokens))
+                                           token_chunk_size=num_new_tokens,
+                                           negative_token_chunk_size=negative_num_new_tokens))
             else:
                 decode_seq_groups.append(
                     ScheduledSequenceGroup(seq_group, token_chunk_size=1))
-            budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
+            budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens + negative_num_new_tokens)
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
 
         swapped_queue.extendleft(leftover_swapped)
@@ -746,22 +749,24 @@ class Scheduler:
             seq_group = waiting_queue[0]
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
+            negative_waiting_seqs = seq_group.get_negative_seqs(status=SequenceStatus.WAITING)
             assert len(waiting_seqs) == 1, (
                 "Waiting sequence group should have only one prompt "
                 "sequence.")
-            num_new_tokens = self._get_num_new_tokens(seq_group,
-                                                      SequenceStatus.WAITING,
-                                                      enable_chunking, budget)
+            num_new_tokens, negative_num_new_tokens = self._get_num_new_tokens(
+                seq_group, SequenceStatus.WAITING, enable_chunking, budget, return_negative=True)
             if not enable_chunking:
                 num_prompt_tokens = waiting_seqs[0].get_len()
                 assert num_new_tokens == num_prompt_tokens
 
             prompt_limit = self._get_prompt_limit(seq_group)
-            if num_new_tokens > prompt_limit:
+            if num_new_tokens + negative_num_new_tokens > prompt_limit:
                 logger.warning(
-                    "Input prompt (%d tokens) is too long"
-                    " and exceeds limit of %d", num_new_tokens, prompt_limit)
+                    "Input prompt (%d tokens) (%d negative tokens) is too long"
+                    " and exceeds limit of %d", num_new_tokens, negative_num_new_tokens, prompt_limit)
                 for seq in waiting_seqs:
+                    seq.status = SequenceStatus.FINISHED_IGNORED
+                for seq in negative_waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 ignored_seq_groups.append(seq_group)
                 waiting_queue.popleft()
@@ -773,10 +778,12 @@ class Scheduler:
                 break
             elif can_allocate == AllocStatus.NEVER:
                 logger.warning(
-                    "Input prompt (%d tokens) is too long"
+                    "Input prompt (%d tokens) (%d negative tokens) is too long"
                     " and exceeds the capacity of block_manager",
-                    num_new_tokens)
+                    num_new_tokens, negative_num_new_tokens)
                 for seq in waiting_seqs:
+                    seq.status = SequenceStatus.FINISHED_IGNORED
+                for seq in negative_waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 ignored_seq_groups.append(seq_group)
                 waiting_queue.popleft()
@@ -798,7 +805,7 @@ class Scheduler:
 
             num_new_seqs = seq_group.get_max_num_running_seqs()
             if (num_new_tokens == 0
-                    or not budget.can_schedule(num_new_tokens=num_new_tokens,
+                    or not budget.can_schedule(num_new_tokens=num_new_tokens + negative_num_new_tokens,
                                                num_new_seqs=num_new_seqs)):
                 break
 
@@ -812,8 +819,9 @@ class Scheduler:
                     is_prefill=True) + 1)
             seq_groups.append(
                 ScheduledSequenceGroup(seq_group=seq_group,
-                                       token_chunk_size=num_new_tokens))
-            budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
+                                       token_chunk_size=num_new_tokens,
+                                       negative_token_chunk_size=negative_num_new_tokens))
+            budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens + negative_num_new_tokens)
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
 
         # Queue requests that couldn't be scheduled.
@@ -1048,6 +1056,7 @@ class Scheduler:
                 scheduler_outputs.scheduled_seq_groups):
             seq_group = scheduled_seq_group.seq_group
             token_chunk_size = scheduled_seq_group.token_chunk_size
+            negative_token_chunk_size = scheduled_seq_group.negative_token_chunk_size
             seq_group.maybe_set_first_scheduled_time(now)
 
             # seq_id -> SequenceData
@@ -1066,11 +1075,25 @@ class Scheduler:
                 encoder_seq_data = None
                 cross_block_table = None
 
+            if seq_group.has_negative_seqs():
+                # seq_id -> SequenceData
+                negative_seq_data: Dict[int, SequenceData] = {}
+                # seq_id -> physical block numbers
+                negative_block_tables: Dict[int, List[int]] = {}
+            else:
+                negative_seq_data = None
+                negative_block_tables = None
+
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 seq_id = seq.seq_id
                 seq_data[seq_id] = seq.data
                 block_tables[seq_id] = self.block_manager.get_block_table(seq)
                 self.block_manager.access_all_blocks_in_seq(seq, now)
+
+                if seq_group.has_negative_seqs():
+                    negative_seq = seq_group.negative_seqs_dict[seq_id]
+                    negative_seq_data[seq_id] = negative_seq.data
+                    negative_block_tables[seq_id] = self.block_manager.get_negative_block_table(negative_seq)
 
             if self.cache_config.enable_prefix_caching:
                 common_computed_block_nums = (
@@ -1097,6 +1120,13 @@ class Scheduler:
                         seqs[0].data.get_len()):
                     do_sample = False
 
+                negative_seqs = seq_group.get_negative_seqs()
+                assert len(negative_seqs) == 1
+                negative_num_computed_tokens = negative_seqs[0].data.get_num_computed_tokens()
+                if (negative_token_chunk_size + negative_num_computed_tokens <
+                        negative_seqs[0].data.get_len()):
+                    do_sample = False
+
             # It assumes the scheduled_seq_groups is ordered by
             # prefill < decoding.
             if is_first_prefill or not self.scheduler_config.send_delta_data:
@@ -1109,10 +1139,13 @@ class Scheduler:
                     do_sample=do_sample,
                     pooling_params=seq_group.pooling_params,
                     token_chunk_size=token_chunk_size,
+                    negative_token_chunk_size=negative_token_chunk_size,
                     lora_request=seq_group.lora_request,
                     computed_block_nums=common_computed_block_nums,
                     encoder_seq_data=encoder_seq_data,
                     cross_block_table=cross_block_table,
+                    negative_seq_data=negative_seq_data,
+                    negative_block_tables=negative_block_tables,
                     state=seq_group.state,
                     # `multi_modal_data` will only be present for the 1st comm
                     # between engine and worker.
@@ -1206,7 +1239,8 @@ class Scheduler:
         seq_group.init_multi_step(num_scheduler_steps=num_lookahead_slots + 1)
 
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
-            cows = self.block_manager.append_slots(seq, num_lookahead_slots)
+            cows = self.block_manager.append_slots(seq, num_lookahead_slots, seq_group)
+            assert len(cows) == 0
             if len(cows) > 0:
                 blocks_to_copy.extend(cows)
 
@@ -1331,7 +1365,7 @@ class Scheduler:
 
     def _get_num_new_tokens(self, seq_group: SequenceGroup,
                             status: SequenceStatus, enable_chunking: bool,
-                            budget: SchedulingBudget) -> int:
+                            budget: SchedulingBudget, return_negative: bool = False) -> int:
         """Get the next new tokens to compute for a given sequence group
             that's in a given `status`.
 
@@ -1343,14 +1377,27 @@ class Scheduler:
         Returns 0 if the new token cannot be computed due to token budget.
         """
         num_new_tokens = 0
+        negative_num_new_tokens = 0
         seqs = seq_group.get_seqs(status=status)
         for seq in seqs:
             num_new_tokens += seq.get_num_new_tokens()
         assert num_new_tokens > 0
+        if return_negative and seq_group.has_negative_seqs():
+            negative_seqs = seq_group.get_negative_seqs(status=status)
+            for negative_seq in negative_seqs:
+                negative_num_new_tokens += negative_seq.get_num_new_tokens()
+            assert negative_num_new_tokens > 0
         # Chunk if a running request cannot fit in.
         # If number of seq > 1, it means it is doing beam search in a
         # decode phase. Do not chunk in that case.
-        if enable_chunking and len(seqs) == 1:
-            num_new_tokens = min(num_new_tokens,
-                                 budget.remaining_token_budget())
-        return num_new_tokens
+        if return_negative:
+            if enable_chunking and len(seqs) == 1:
+                if num_new_tokens + negative_num_new_tokens < budget.remaining_token_budget():
+                    return num_new_tokens, negative_num_new_tokens
+                else:
+                    return budget.remaining_token_budget() // 2, budget.remaining_token_budget() // 2
+        else:
+            if enable_chunking and len(seqs) == 1:
+                num_new_tokens = min(num_new_tokens,
+                                    budget.remaining_token_budget())
+            return num_new_tokens
