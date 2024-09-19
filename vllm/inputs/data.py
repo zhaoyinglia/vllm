@@ -33,7 +33,21 @@ class TokensPrompt(TypedDict):
     """
 
 
-SingletonPromptInputs = Union[str, TextPrompt, TokensPrompt]
+class NegativeTextPrompt(TypedDict):
+    """Schema for a text prompt."""
+
+    negative_prompt: str
+    """The input text to be tokenized before passing to the model."""
+
+
+class NegativeTokensPrompt(TypedDict):
+    """Schema for a tokenized prompt."""
+
+    negative_prompt_token_ids: List[int]
+    """A list of token IDs to pass to the model."""
+
+
+SingletonPromptInputs = Union[str, TextPrompt, TokensPrompt, NegativeTextPrompt, NegativeTokensPrompt]
 """
 Set of possible schemas for a single LLM input:
 
@@ -122,6 +136,9 @@ class LLMInputs(TypedDict):
     if the model supports it.
     """
 
+    negative_prompt_token_ids: NotRequired[Optional[List[int]]]
+    negative_prompt: NotRequired[Optional[str]]
+
 
 class EncoderDecoderLLMInputs(LLMInputs):
     """
@@ -138,6 +155,9 @@ class EncoderDecoderLLMInputs(LLMInputs):
     The original encoder prompt text corresponding to the token IDs, if
     available.
     """
+
+    encoder_negative_prompt_token_ids: NotRequired[Optional[List[int]]]
+    encoder_negative_prompt: NotRequired[Optional[str]]
 
 
 _T1 = TypeVar("_T1",
