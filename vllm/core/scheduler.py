@@ -516,9 +516,9 @@ class Scheduler:
         while running_queue:
             seq_group = running_queue[0]
             num_running_tokens, negative_num_running_tokens = self._get_num_new_tokens(
-                seq_group, SequenceStatus.RUNNING, enable_chunking, budget, return_negative=True)
+                seq_group, SequenceStatus.RUNNING, enable_chunking, budget)
 
-            if num_running_tokens == 0:
+            if num_running_tokens + negative_num_running_tokens == 0:
                 break
 
             running_queue.popleft()
@@ -659,9 +659,9 @@ class Scheduler:
             # exceed the maximum number of sequences.
             num_new_seqs = seq_group.get_max_num_running_seqs()
             num_new_tokens, negative_num_new_tokens = self._get_num_new_tokens(
-                seq_group, SequenceStatus.SWAPPED, enable_chunking, budget, return_negative=False)
+                seq_group, SequenceStatus.SWAPPED, enable_chunking, budget)
 
-            if (num_new_tokens == 0
+            if (num_new_tokens + negative_num_new_tokens == 0
                     or not budget.can_schedule(num_new_tokens=num_new_tokens + negative_num_new_tokens,
                                                num_new_seqs=num_new_seqs)):
                 break
@@ -679,7 +679,7 @@ class Scheduler:
                                            negative_token_chunk_size=negative_num_new_tokens))
             else:
                 decode_seq_groups.append(
-                    ScheduledSequenceGroup(seq_group, token_chunk_size=1))
+                    ScheduledSequenceGroup(seq_group, token_chunk_size=1, negative_token_chunk_size=1))
             budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens + negative_num_new_tokens)
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
 
@@ -749,12 +749,11 @@ class Scheduler:
             seq_group = waiting_queue[0]
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
-            negative_waiting_seqs = seq_group.get_negative_seqs(status=SequenceStatus.WAITING)
             assert len(waiting_seqs) == 1, (
                 "Waiting sequence group should have only one prompt "
                 "sequence.")
             num_new_tokens, negative_num_new_tokens = self._get_num_new_tokens(
-                seq_group, SequenceStatus.WAITING, enable_chunking, budget, return_negative=True)
+                seq_group, SequenceStatus.WAITING, enable_chunking, budget)
             if not enable_chunking:
                 num_prompt_tokens = waiting_seqs[0].get_len()
                 assert num_new_tokens == num_prompt_tokens
@@ -765,8 +764,6 @@ class Scheduler:
                     "Input prompt (%d tokens) (%d negative tokens) is too long"
                     " and exceeds limit of %d", num_new_tokens, negative_num_new_tokens, prompt_limit)
                 for seq in waiting_seqs:
-                    seq.status = SequenceStatus.FINISHED_IGNORED
-                for seq in negative_waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 ignored_seq_groups.append(seq_group)
                 waiting_queue.popleft()
@@ -782,8 +779,6 @@ class Scheduler:
                     " and exceeds the capacity of block_manager",
                     num_new_tokens, negative_num_new_tokens)
                 for seq in waiting_seqs:
-                    seq.status = SequenceStatus.FINISHED_IGNORED
-                for seq in negative_waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 ignored_seq_groups.append(seq_group)
                 waiting_queue.popleft()
@@ -804,7 +799,7 @@ class Scheduler:
                     continue
 
             num_new_seqs = seq_group.get_max_num_running_seqs()
-            if (num_new_tokens == 0
+            if (num_new_tokens + negative_num_new_tokens == 0
                     or not budget.can_schedule(num_new_tokens=num_new_tokens + negative_num_new_tokens,
                                                num_new_seqs=num_new_seqs)):
                 break
@@ -1301,6 +1296,9 @@ class Scheduler:
             self.free_seq(seq)
             seq.reset_state_for_recompute()
 
+            negative_seq = seq_group.negative_seqs_dict[seq.seq_id]
+            negative_seq.reset_state_for_recompute()
+
     def _preempt_by_swap(
         self,
         seq_group: SequenceGroup,
@@ -1365,7 +1363,7 @@ class Scheduler:
 
     def _get_num_new_tokens(self, seq_group: SequenceGroup,
                             status: SequenceStatus, enable_chunking: bool,
-                            budget: SchedulingBudget, return_negative: bool = False) -> int:
+                            budget: SchedulingBudget) -> int:
         """Get the next new tokens to compute for a given sequence group
             that's in a given `status`.
 
@@ -1381,23 +1379,31 @@ class Scheduler:
         seqs = seq_group.get_seqs(status=status)
         for seq in seqs:
             num_new_tokens += seq.get_num_new_tokens()
-        assert num_new_tokens > 0
-        if return_negative and seq_group.has_negative_seqs():
-            negative_seqs = seq_group.get_negative_seqs(status=status)
-            for negative_seq in negative_seqs:
+            if seq_group.has_negative_seqs():
+                negative_seq = seq_group.negative_seqs_dict[seq.seq_id]
                 negative_num_new_tokens += negative_seq.get_num_new_tokens()
-            assert negative_num_new_tokens > 0
+        assert num_new_tokens + negative_num_new_tokens > 0
         # Chunk if a running request cannot fit in.
         # If number of seq > 1, it means it is doing beam search in a
         # decode phase. Do not chunk in that case.
-        if return_negative:
+        if seq_group.has_negative_seqs():
             if enable_chunking and len(seqs) == 1:
                 if num_new_tokens + negative_num_new_tokens < budget.remaining_token_budget():
                     return num_new_tokens, negative_num_new_tokens
                 else:
-                    return budget.remaining_token_budget() // 2, budget.remaining_token_budget() // 2
+                    half_remaining_budget = budget.remaining_token_budget() // 2
+                    rt_num_new_tokens = min(num_new_tokens, half_remaining_budget)
+                    rt_negative_num_new_tokens = min(negative_num_new_tokens, half_remaining_budget)
+
+                    if rt_num_new_tokens == num_new_tokens and rt_negative_num_new_tokens != negative_num_new_tokens:
+                        return 0, 0
+                    elif rt_num_new_tokens != num_new_tokens and rt_negative_num_new_tokens == negative_num_new_tokens:
+                        return 0, 0
+                    else:
+                        return rt_num_new_tokens, rt_negative_num_new_tokens
+            return num_new_tokens, negative_num_new_tokens
         else:
             if enable_chunking and len(seqs) == 1:
                 num_new_tokens = min(num_new_tokens,
                                     budget.remaining_token_budget())
-            return num_new_tokens
+            return num_new_tokens, 0
