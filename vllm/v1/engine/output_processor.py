@@ -208,6 +208,11 @@ class RequestState:
 
         if self.parent_req is None:
             outputs = [output]
+        elif getattr(self.parent_req, "in_hybrid_mode", False):
+            request_id, outputs, finished = self.parent_req.get_hybrid_outputs(
+                request_id, output)
+            if not outputs:
+                return None
         else:
             request_id, outputs, finished = self.parent_req.get_outputs(
                 request_id, output)
