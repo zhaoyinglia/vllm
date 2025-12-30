@@ -39,7 +39,7 @@ class BatchSchedulerManager:
     ) -> None:
         self.additional_config = vllm_config.additional_config
 
-        self.batch_size = self.additional_config.get("cfg_batch_size", 2)
+        self.batch_size = self.additional_config.get("cfg_batch_size", 1)
         self.boi = self.additional_config.get("boi_token_id", -1)
         self.soi = self.additional_config.get("soi_token_id", -1)
         self.eoi = self.additional_config.get("eoi_token_id", -1)
@@ -227,6 +227,7 @@ class BatchSchedulerManager:
             assert token in self.resolution_map, f"{self.resolution_token_ids[req_id]} has unknown token {token}"
             resolution_text += self.resolution_map[token]
 
+        assert "*" in resolution_text, f"Invalid resolution text {resolution_text}"
         height_str, width_str = resolution_text.split("*")
         height = int(height_str.strip())
         width = int(width_str.strip())

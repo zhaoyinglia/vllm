@@ -282,6 +282,7 @@ class ClassifierFreeGuidanceLogitsForVisualTokenProcessor(LogitsProcessor):
         self.device = device
         self.pin_memory = is_pin_memory
         self.visual_token_start_index = 151854
+        self.cfg_batch_size = vllm_config.additional_config.get("cfg_batch_size", 1)
 
         self.metadata: dict[int, HybridSchedulerMetadata] = {}
         self.guidance_scale: dict[int, int] = {}
@@ -294,8 +295,10 @@ class ClassifierFreeGuidanceLogitsForVisualTokenProcessor(LogitsProcessor):
         for index, params, _, _, metadata in batch_update.added:
             if not getattr(params, "extra_args", None):
                 continue
+            if metadata is None:
+                continue
             guidance_scale = params.extra_args.get("guidance_scale", None)
-            if metadata is None or guidance_scale is None:
+            if self.cfg_batch_size > 1 and guidance_scale is None:
                 continue
             self.activated = True
             self.metadata[index] = metadata
@@ -327,10 +330,10 @@ class ClassifierFreeGuidanceLogitsForVisualTokenProcessor(LogitsProcessor):
             return logits
 
         indices = list(self.metadata.keys())
-        if logits.shape[0] != len(indices) or logits.shape[0] % 2 != 0:
+        if logits.shape[0] != len(indices) or logits.shape[0] % self.cfg_batch_size != 0:
             return logits
 
-        for i in range(0, len(indices), 2):
+        for i in range(0, len(indices), self.cfg_batch_size):
             format_token_ids = self.metadata[i].format_token_ids
             in_visual = self.metadata[i].in_visual
             in_image = self.metadata[i].in_image
@@ -341,10 +344,10 @@ class ClassifierFreeGuidanceLogitsForVisualTokenProcessor(LogitsProcessor):
                 logits[i].masked_fill_(mask, float("-inf"))
             elif in_image and in_visual:
                 cond_logits = torch.nn.functional.log_softmax(logits[i], dim=-1)
-                uncond_logits = torch.nn.functional.log_softmax(logits[i+1], dim=-1)
-                guided_logits = uncond_logits + guidance_scale * (cond_logits - uncond_logits)
-                logits[i] = guided_logits
-                # logits[i+1] = guided_logits
+                if guidance_scale is not None and guidance_scale != 1.0:
+                    uncond_logits = torch.nn.functional.log_softmax(logits[i+1], dim=-1)
+                    guided_logits = uncond_logits + guidance_scale * (cond_logits - uncond_logits)
+                    logits[i] = guided_logits
                 mask = torch.ones_like(logits[i], dtype=torch.bool)
                 mask[self.visual_token_start_index:] = False
                 logits[i].masked_fill_(mask, float("-inf"))
