@@ -1,4 +1,10 @@
 <!-- markdownlint-disable MD001 MD041 -->
+
+---
+**vLLM-FL is a fork of vLLM that introduces a plugin-based architecture for supporting diverse AI chips, built on top of [FlagOS](https://github.com/flagos-ai), a unified open-source AI system software stack.**
+
+---
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/vllm-project/vllm/main/docs/assets/logos/vllm-logo-text-dark.png">
