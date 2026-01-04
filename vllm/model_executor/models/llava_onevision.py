@@ -450,6 +450,16 @@ class LlavaOnevisionMultiModalProjector(nn.Module):
 class LlavaOnevisionForConditionalGeneration(nn.Module, SupportsMultiModal,
                                              SupportsPP):
 
+    # --- FLAGSCALE MODIFICATION BEG ---
+    packed_modules_mapping = {
+        "qkv_proj": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+        ],
+    }
+    # --- FLAGSCALE MODIFICATION END ---
+
     hf_to_vllm_mapper = WeightsMapper(
         orig_to_new_prefix={
             # mapping for new names in checkpoint saved after transformers v4.52

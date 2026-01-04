@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import re
 from copy import copy
 from typing import Optional
 
@@ -31,8 +32,11 @@ class ParentRequest:
     # To efficiently obtain child sampling params
     cached_child_sampling_params: Optional[SamplingParams]
 
+    in_hybrid_mode: Optional[bool] = False
+
     def __init__(self, request_id: str,
-                 sampling_params: SamplingParams) -> None:
+                 sampling_params: SamplingParams,
+                 num_child_request: Optional[int] = 1) -> None:
         self.request_id = request_id
         self.sampling_params = sampling_params
 
@@ -42,6 +46,10 @@ class ParentRequest:
             == RequestOutputKind.FINAL_ONLY) else []
         self.max_num_generation_tokens = 0
         self.cached_child_sampling_params = None
+
+        if num_child_request > 1:
+            self.output_aggregator = []
+            self.in_hybrid_mode = True
 
     def _get_child_sampling_params(
         self,
@@ -90,6 +98,25 @@ class ParentRequest:
     @property
     def n(self) -> int:
         return self.sampling_params.n
+
+    def get_hybrid_outputs(
+        self,
+        child_request_id: str,
+        completion_output: CompletionOutput,
+    ) -> tuple[str, list[CompletionOutput], bool]:
+        if completion_output.finished():
+            self.child_requests.remove(child_request_id)
+
+        request_id = self.request_id
+        if self.sampling_params.output_kind != RequestOutputKind.FINAL_ONLY:
+            # If streaming, just return the current output.
+            outputs = [completion_output]
+        else:
+            request_id = re.sub(r'_cfg_', '', child_request_id)
+            outputs = [completion_output]
+
+        finished = completion_output.finished()
+        return request_id, outputs, finished
 
     def get_outputs(
         self,
