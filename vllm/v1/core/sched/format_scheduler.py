@@ -1072,6 +1072,7 @@ class Scheduler(SchedulerInterface):
             # Check for stop and update request state.
             # This must be called before we make the EngineCoreOutput.
             stopped = check_stop(request, self.max_model_len)
+            stopped = stopped or assert_stopped
             if stopped or assert_stopped:
                 del new_token_ids[num_new:]  # Trim new tokens if needed.
                 break
