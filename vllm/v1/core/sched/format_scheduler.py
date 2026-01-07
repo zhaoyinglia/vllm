@@ -511,7 +511,11 @@ class Scheduler(SchedulerInterface):
 
                 req_index += 1
                 self.running.append(request)
-                self.batch_manager.set_request_metadata(request)
+                have_metadata = (
+                    self.batch_manager.get_req_metadata(request) is not None
+                )
+                if not have_metadata:
+                    self.batch_manager.set_request_metadata(request)
                 if self.log_stats:
                     request.record_event(EngineCoreEventType.SCHEDULED,
                                          scheduled_timestamp)
@@ -1074,7 +1078,7 @@ class Scheduler(SchedulerInterface):
             # This must be called before we make the EngineCoreOutput.
             stopped = check_stop(request, self.max_model_len)
             stopped = stopped or assert_stopped
-            if stopped or assert_stopped:
+            if stopped:
                 del new_token_ids[num_new:]  # Trim new tokens if needed.
                 break
         return new_token_ids, stopped
