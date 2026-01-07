@@ -387,8 +387,8 @@ class Scheduler(SchedulerInterface):
                     break
 
                 self.batch_manager.start_new_batch()
-                while self.waiting and self.batch_manager.remaining_slots(
-                ) > 0:
+                while (self.waiting
+                       and self.batch_manager.remaining_slots() > 0):
                     if len(self.running) == self.max_num_running_reqs:
                         break
 
