@@ -3,6 +3,7 @@
 
 import gc
 import itertools
+import os
 import time
 from collections import defaultdict
 from collections.abc import Iterator
@@ -126,20 +127,28 @@ PerLayerAttnMetadata: TypeAlias = Union[list[AttnMetadataDict],
                                         AttnMetadataDict]
 
 # --- FLAGSCALE MODIFICATION BEG ---
-# Know more about FlagGems: https://github.com/FlagOpen/FlagGems  
-import os
+# Know more about FlagGems: https://github.com/FlagOpen/FlagGems
+
 if os.getenv("USE_FLAGGEMS", "false").lower() in ("1", "true", "yes"):
     try:
         print("Try to using FLAGGEMS...")
         import flag_gems
-        flag_gems.enable(record=True, unused=["exponential_", "softmax"], path="/tmp/gems_oplist.log.txt")
-        logger.info("Successfully enabled flag_gems as default ops implementation.")
+        flag_gems.enable(record=True,
+                         unused=["exponential_", "softmax"],
+                         path="/tmp/gems_oplist.log.txt")
+        logger.info(
+            "Successfully enabled flag_gems as default ops implementation.")
     except ImportError as e:
         # Throw an exception directly if failure occurs
-        raise ImportError("Failed to import 'flag_gems'. Please install flag_gems or set USE_FLAGGEMS=false to disable it.") from e
+        raise ImportError(
+            "Failed to import 'flag_gems'. "
+            "Please install flag_gems or set USE_FLAGGEMS=false to disable it."
+        ) from e
     except Exception as e:
         # Throw an exception directly if failure occurs
-        raise RuntimeError(f"Failed to enable 'flag_gems': {e}. Please check your flag_gems installation or set USE_FLAGGEMS=false to disable it.") from e
+        raise RuntimeError(f"Failed to enable 'flag_gems': {e}. "
+                           f"Please check your flag_gems installation "
+                           f"or set USE_FLAGGEMS=false to disable it.") from e
 # --- FLAGSCALE MODIFICATION END ---
 
 
@@ -635,16 +644,18 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_computed_tokens = req_data.num_computed_tokens[i]
             new_block_ids = req_data.new_block_ids[i]
             resumed_from_preemption = req_data.resumed_from_preemption[i]
-            if getattr(req_data, 'sampling_params', None) is not None:
-                req_state.sampling_params = req_data.sampling_params[i]
-            if getattr(req_data, 'hybrid_metadata', None) is not None:
-                req_state.hybrid_metadata = req_data.hybrid_metadata[i]
+            sampling_params = getattr(req_data, "sampling_params", None)
+            hybrid_metadata = getattr(req_data, "hybrid_metadata", None)
+            if sampling_params is not None and hybrid_metadata is not None:
+                req_state.sampling_params = sampling_params[i]
+                req_state.hybrid_metadata = hybrid_metadata[i]
 
             # Update the cached states.
             req_state.num_computed_tokens = num_computed_tokens
 
             # NOTE(zhaoyinglia): emu must use token_ids from schdeuled_output
-            if not is_last_rank or getattr(req_data, 'hybrid_metadata', None) is not None:
+            if not is_last_rank or getattr(req_data, 'hybrid_metadata',
+                                           None) is not None:
                 # When using PP, the scheduler sends the sampled tokens back,
                 # because there's no direct communication between the first-
                 # stage worker and the last-stage worker.
@@ -690,12 +701,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
             if req_data.hybrid_metadata is not None:
                 self.input_batch.batch_update_builder.updated.append(
-                    (req_index, req_state.sampling_params, req_state.hybrid_metadata))
+                    (req_index, req_state.sampling_params,
+                     req_state.hybrid_metadata))
 
             # For the last rank, we don't need to update the token_ids_cpu
             # because the sampled tokens are already cached.
             # NOTE(zhaoyinglia): emu must use token_ids from schdeuled_output
-            if not is_last_rank or getattr(req_data, 'hybrid_metadata', None) is not None:
+            if not is_last_rank or hybrid_metadata is not None:
                 # Add new_token_ids to token_ids_cpu.
                 start_token_index = num_computed_tokens
                 end_token_index = num_computed_tokens + len(new_token_ids)
@@ -705,13 +717,23 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 self.input_batch.num_tokens_no_spec[
                     req_index] = end_token_index
                 self.input_batch.num_tokens[req_index] = end_token_index
-                # NOTE(zhaoyinglia): Update topk/topp/temp, cause different token type needs different value
-                self.input_batch.top_k_cpu[req_index] = req_state.sampling_params.top_k
-                self.input_batch.top_p_cpu[req_index] = req_state.sampling_params.top_p
-                self.input_batch.temperature_cpu[req_index] = req_state.sampling_params.temperature
-                self.input_batch.top_k[req_index] = req_state.sampling_params.top_k
-                self.input_batch.top_p[req_index] = req_state.sampling_params.top_p
-                self.input_batch.temperature[req_index] = req_state.sampling_params.temperature
+                # NOTE(zhaoyinglia):
+                # Update topk/topp/temp,
+                # cause different token type needs different value
+                if (hybrid_metadata is not None
+                        and req_state.sampling_params is not None):
+                    self.input_batch.top_k_cpu[
+                        req_index] = req_state.sampling_params.top_k
+                    self.input_batch.top_p_cpu[
+                        req_index] = req_state.sampling_params.top_p
+                    self.input_batch.temperature_cpu[
+                        req_index] = req_state.sampling_params.temperature
+                    self.input_batch.top_k[
+                        req_index] = req_state.sampling_params.top_k
+                    self.input_batch.top_p[
+                        req_index] = req_state.sampling_params.top_p
+                    self.input_batch.temperature[
+                        req_index] = req_state.sampling_params.temperature
 
             # Add spec_token_ids to token_ids_cpu.
             spec_token_ids = (

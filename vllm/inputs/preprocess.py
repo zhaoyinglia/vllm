@@ -16,9 +16,10 @@ from vllm.multimodal.processing import BaseMultiModalProcessor
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 
 from .data import (DecoderOnlyInputs, EmbedsInputs, EmbedsPrompt,
-                   EncoderDecoderInputs, ProcessorInputs, PromptType,
-                   SingletonInputs, SingletonPrompt, TextPrompt, TokenInputs,
-                   TokensPrompt, embeds_inputs, token_inputs)
+                   EncoderDecoderInputs, ExplicitEncoderDecoderPrompt,
+                   ProcessorInputs, PromptType, SingletonInputs,
+                   SingletonPrompt, TextPrompt, TokenInputs, TokensPrompt,
+                   embeds_inputs, token_inputs)
 from .parse import is_explicit_encoder_decoder_prompt, parse_singleton_prompt
 
 logger = init_logger(__name__)
@@ -311,7 +312,8 @@ class InputPreprocessor:
     ) -> Union[TokenInputs, MultiModalInputs]:
         prompt_token_ids = self._truncate_inputs(
             parsed_content["prompt_token_ids"], tokenization_kwargs)
-        uncond_prompt_token_ids_raw = parsed_content.get("uncond_prompt_token_ids")
+        uncond_prompt_token_ids_raw = parsed_content.get(
+            "uncond_prompt_token_ids")
         if uncond_prompt_token_ids_raw is not None:
             uncond_prompt_token_ids = self._truncate_inputs(
                 parsed_content["uncond_prompt_token_ids"], tokenization_kwargs)
@@ -330,8 +332,7 @@ class InputPreprocessor:
         else:
             inputs = token_inputs(
                 prompt_token_ids=prompt_token_ids,
-                uncond_prompt_token_ids=uncond_prompt_token_ids
-            )
+                uncond_prompt_token_ids=uncond_prompt_token_ids)
 
         if cache_salt := parsed_content.get("cache_salt"):
             inputs["cache_salt"] = cache_salt
@@ -364,7 +365,7 @@ class InputPreprocessor:
             )
             uncond_prompt_token_ids = None
             if uncond_prompt_text:
-                uncond_prompt_token_ids = self._tokenize_prompt_async(
+                uncond_prompt_token_ids = self._tokenize_prompt(
                     uncond_prompt_text,
                     tokenization_kwargs=tokenization_kwargs,
                 )
@@ -567,12 +568,14 @@ class InputPreprocessor:
         decoder_inputs: Optional[SingletonInputs]
 
         if is_explicit_encoder_decoder_prompt(prompt):
+            # `cast` is needed for mypy, but not pyright
+            prompt_ = cast(ExplicitEncoderDecoderPrompt, prompt)
             encoder_inputs = self._prompt_to_llm_inputs(
-                prompt["encoder_prompt"],
+                prompt_["encoder_prompt"],
                 tokenization_kwargs=tokenization_kwargs,
                 mm_uuids=mm_uuids,
             )
-            if (decoder_input := prompt["decoder_prompt"]) is None:
+            if (decoder_input := prompt_["decoder_prompt"]) is None:
                 decoder_inputs = None
             else:
                 decoder_inputs = self._prompt_to_llm_inputs(decoder_input)
@@ -584,7 +587,7 @@ class InputPreprocessor:
                                                   decoder_inputs))
         else:
             inputs = self._prompt_to_llm_inputs(
-                prompt,
+                cast(SingletonPrompt, prompt),
                 tokenization_kwargs=tokenization_kwargs,
                 mm_uuids=mm_uuids,
             )
@@ -660,7 +663,7 @@ class InputPreprocessor:
 
         # Decoder-only operation
         return self._process_decoder_only_prompt(
-            prompt,
+            cast(SingletonPrompt, prompt),
             tokenization_kwargs=tokenization_kwargs,
             mm_uuids=mm_uuids,
         )

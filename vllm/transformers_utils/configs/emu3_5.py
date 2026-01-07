@@ -3,6 +3,9 @@
 
 # Copyright 2025 The BAAI team.
 
+# yapf: disable
+# ruff: noqa: E501
+# coding=utf-8
 """ Emu3_5 model configuration"""
 
 from typing import Optional
@@ -133,16 +136,16 @@ class Emu3_5Config(PretrainedConfig):
         eoi_token_id: int = 151853,
         eol_token_id: int = 151846,
         eof_token_id: int = 151847,
-        image_area: int = 720 * 720, 
+        image_area: int = 720 * 720,
         pretraining_tp: int = 1,
         tie_word_embeddings: bool = False,
         rope_theta: float = 1000000.0,
-        rope_scaling: Optional = None,
+        rope_scaling: Optional[float] = None,
         attention_dropout: float = 0.1,
         layer_types=None,
         use_sliding_window=False,
-        sliding_window: Optional[int] = None,
-        max_window_layers: Optional[int] = None,
+        sliding_window: int = 4096,
+        max_window_layers: int = 28,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -182,9 +185,8 @@ class Emu3_5Config(PretrainedConfig):
         self.layer_types = layer_types
         if self.layer_types is None:
             self.layer_types = [
-                "sliding_attention"
-                if self.sliding_window is not None and i >= self.max_window_layers
-                else "full_attention"
+                "sliding_attention" if self.sliding_window is not None
+                and i >= self.max_window_layers else "full_attention"
                 for i in range(self.num_hidden_layers)
             ]
         layer_type_validation(self.layer_types)
@@ -204,18 +206,24 @@ class Emu3_5Config(PretrainedConfig):
         if self.rope_scaling is None:
             return
 
-        if not isinstance(self.rope_scaling, dict) or len(self.rope_scaling) != 2:
+        if not isinstance(self.rope_scaling, dict) or len(
+                self.rope_scaling) != 2:
             raise ValueError(
                 "`rope_scaling` must be a dictionary with with two fields, `type` and `factor`, "
-                f"got {self.rope_scaling}"
-            )
+                f"got {self.rope_scaling}")
         rope_scaling_type = self.rope_scaling.get("type", None)
         rope_scaling_factor = self.rope_scaling.get("factor", None)
-        if rope_scaling_type is None or rope_scaling_type not in ["linear", "dynamic"]:
+        if rope_scaling_type is None or rope_scaling_type not in [
+                "linear", "dynamic"
+        ]:
             raise ValueError(
                 f"`rope_scaling`'s type field must be one of ['linear', 'dynamic'], got {rope_scaling_type}"
             )
-        if rope_scaling_factor is None or not isinstance(rope_scaling_factor, float) or rope_scaling_factor <= 1.0:
-            raise ValueError(f"`rope_scaling`'s factor field must be a float > 1, got {rope_scaling_factor}")
+        if rope_scaling_factor is None or not isinstance(
+                rope_scaling_factor, float) or rope_scaling_factor <= 1.0:
+            raise ValueError(
+                f"`rope_scaling`'s factor field must be a float > 1, got {rope_scaling_factor}"
+            )
+
 
 __all__ = ["Emu3_5Config"]

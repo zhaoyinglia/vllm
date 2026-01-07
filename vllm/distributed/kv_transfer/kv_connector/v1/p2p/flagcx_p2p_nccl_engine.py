@@ -1,9 +1,12 @@
-# Mainly adopted from vllm/distributed/kv_transfer/kv_connector/v1/p2p/p2p_nccl_engine.py
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+# ruff: noqa: E501, E402
+# Mainly adopted from vllm/distributed/kv_transfer/kv_connector/v1/p2p/p2p_nccl_engine.py
+import ctypes
 import logging
 import os
+import sys
 import threading
 import time
 import typing
@@ -15,23 +18,18 @@ from typing import Any, Optional
 import msgpack
 import torch
 import zmq
-import sys
-import ctypes
 
 from vllm.config import KVTransferConfig
-
-sys.path.append(os.getenv('FLAGCX_PATH'))
-from plugin.interservice.flagcx_wrapper import (
-    FLAGCXLibrary,
-    buffer_type,
-    cudaStream_t,
-    flagcxComm_t,
-    flagcxDataTypeEnum,
-)
-
 from vllm.distributed.kv_transfer.kv_connector.v1.p2p.tensor_memory_pool import (  # noqa: E501
     TensorMemoryPool)
 from vllm.utils import current_stream, get_ip
+
+flagcx_path = os.getenv("FLAGCX_PATH", None)
+assert flagcx_path is not None, "FLAGCX_PATH environment variable is not set."
+sys.path.append(flagcx_path)
+from plugin.interservice.flagcx_wrapper import (FLAGCXLibrary, buffer_type,
+                                                flagcxComm_t,
+                                                flagcxDataTypeEnum)
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +87,9 @@ class P2pNcclEngine:
         self.rank = port_offset
         self.local_rank = local_rank
         self.device = torch.device(f"cuda:{self.local_rank}")
-        flagcx_path = os.getenv('FLAGCX_PATH')
-        library_path=os.path.join(flagcx_path, "build/lib/libflagcx.so")
+        flagcx_path = os.getenv('FLAGCX_PATH', None)
+        assert flagcx_path is not None, "FLAGCX_PATH environment variable is not set."
+        library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
         self.flagcx = FLAGCXLibrary(library_path)
 
         if not hostname:
@@ -131,7 +130,7 @@ class P2pNcclEngine:
 
         self.send_stream = torch.cuda.Stream()
         self.recv_stream = torch.cuda.Stream()
-        self.flagcx_streams = {}
+        self.flagcx_streams: dict[torch.cuda.Stream, Any] = {}
 
         mem_pool_size_gb = float(
             self.config.get_from_extra_config("mem_pool_size_gb",
@@ -345,9 +344,9 @@ class P2pNcclEngine:
                         comm: flagcxComm_t = self.flagcx.flagcxCommInitRank(
                             2, ctypes.byref(unique_id), rank)
                     self.comms[remote_address.decode()] = (comm, rank)
-                    logger.info("🤝flagcxCommInitRank Success, %s👈%s, MyRank:%s",
-                                self.zmq_address, remote_address.decode(),
-                                rank)
+                    logger.info(
+                        "🤝flagcxCommInitRank Success, %s👈%s, MyRank:%s",
+                        self.zmq_address, remote_address.decode(), rank)
             elif data["cmd"] == "PUT":
                 tensor_id = data["tensor_id"]
                 try:
@@ -550,9 +549,10 @@ class P2pNcclEngine:
 
         with torch.cuda.stream(stream):
             flagcx_stream = self._get_or_create_flagcx_stream(stream)
-            self.flagcx.flagcxSend(buffer_type(tensor.data_ptr()), tensor.numel(),
-                               flagcxDataTypeEnum.from_torch(tensor.dtype), dst,
-                               comm, flagcx_stream)
+            self.flagcx.flagcxSend(buffer_type(tensor.data_ptr()),
+                                   tensor.numel(),
+                                   flagcxDataTypeEnum.from_torch(tensor.dtype),
+                                   dst, comm, flagcx_stream)
         stream.synchronize()
 
     def recv(self, comm, tensor: torch.Tensor, src: int, stream=None):
@@ -564,9 +564,10 @@ class P2pNcclEngine:
 
         with torch.cuda.stream(stream):
             flagcx_stream = self._get_or_create_flagcx_stream(stream)
-            self.flagcx.flagcxRecv(buffer_type(tensor.data_ptr()), tensor.numel(),
-                               flagcxDataTypeEnum.from_torch(tensor.dtype), src,
-                               comm, flagcx_stream)
+            self.flagcx.flagcxRecv(buffer_type(tensor.data_ptr()),
+                                   tensor.numel(),
+                                   flagcxDataTypeEnum.from_torch(tensor.dtype),
+                                   src, comm, flagcx_stream)
         stream.synchronize()
 
     def close(self) -> None:

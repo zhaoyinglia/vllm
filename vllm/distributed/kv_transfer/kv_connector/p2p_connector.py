@@ -1,22 +1,29 @@
 # Mainly adopted from https://github.com/FlagOpen/FlagScale/blob/44ceca57dd6f86b10163968e617497c613e47d6e/flagscale/backends/vllm/vllm/distributed/kv_transfer/kv_connector/p2p_connector.py.
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import os
-import re
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING, Union
 
+import regex as re
 import torch
 
 import vllm.envs as envs
 from vllm import _custom_ops as ops
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.base import KVConnectorBase
+
 # --- FLAGSCALE MODIFICATION BEG ---
-if os.getenv("USE_FLAGCX", "false").lower() in ("1", "true"):
-    from vllm.distributed.kv_transfer.kv_pipe.flagcx_p2p_nccl_pipe import P2pNcclPipe
-else:
+if TYPE_CHECKING:
     from vllm.distributed.kv_transfer.kv_pipe.p2p_nccl_pipe import P2pNcclPipe
+else:
+    if os.getenv("USE_FLAGCX", "false").lower() in ("1", "true"):
+        from vllm.distributed.kv_transfer.kv_pipe.flagcx_p2p_nccl_pipe import (
+            P2pNcclPipe)
+    else:
+        from vllm.distributed.kv_transfer.kv_pipe.p2p_nccl_pipe import (
+            P2pNcclPipe)
 # --- FLAGSCALE MODIFICATION END ---
 from vllm.logger import init_logger
 from vllm.sequence import IntermediateTensors
@@ -56,7 +63,7 @@ class P2pConnector(KVConnectorBase):
         self,
         model_executable: torch.nn.Module,
         model_input: "ModelInputForGPUWithSamplingMetadata",
-        kv_caches: List[torch.Tensor],
+        kv_caches: list[torch.Tensor],
         hidden_or_intermediate_states: Union[torch.Tensor,
                                              IntermediateTensors],
     ) -> None:
@@ -149,8 +156,8 @@ class P2pConnector(KVConnectorBase):
     def recv_kv_caches_and_hidden_states(
         self, model_executable: torch.nn.Module,
         model_input: "ModelInputForGPUWithSamplingMetadata",
-        kv_caches: List[torch.Tensor]
-    ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
+        kv_caches: list[torch.Tensor]
+    ) -> tuple[Union[torch.Tensor, IntermediateTensors], bool,
                "ModelInputForGPUWithSamplingMetadata"]:
 
         # When bypass_model_exec is set to False, it means that at least for one
@@ -281,7 +288,7 @@ class P2pConnector(KVConnectorBase):
         return hidden_or_intermediate_states, bypass_model_exec, model_input
 
     @staticmethod
-    def parse_request_id(request_id: str, is_prefill=True) -> Tuple[str, int]:
+    def parse_request_id(request_id: str, is_prefill=True) -> tuple[str, int]:
         logger.debug("parse_request_id, request_id: %s, is_prefill: %s",
                      request_id, is_prefill)
         # Regular expression to match the string hostname and integer port

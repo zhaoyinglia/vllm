@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import re
 from copy import copy
 from typing import Optional
+
+import regex as re
 
 from vllm.outputs import CompletionOutput
 from vllm.sampling_params import RequestOutputKind, SamplingParams
@@ -34,9 +35,10 @@ class ParentRequest:
 
     in_hybrid_mode: Optional[bool] = False
 
-    def __init__(self, request_id: str,
+    def __init__(self,
+                 request_id: str,
                  sampling_params: SamplingParams,
-                 num_child_request: Optional[int] = 1) -> None:
+                 num_child_request: int = 1) -> None:
         self.request_id = request_id
         self.sampling_params = sampling_params
 

@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Callable, Optional, TypeVar
 import torch
 
 from vllm import SamplingParams
+from vllm.v1.core.sched.batch_manager import HybridSchedulerMetadata
 from vllm.v1.sample.logits_processor.interface import (BatchUpdate,
                                                        LogitsProcessor,
                                                        MoveDirectionality)
-from vllm.v1.core.sched.batch_manager import HybridSchedulerMetadata
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
@@ -277,49 +277,90 @@ def process_dict_updates(
 
 
 class ClassifierFreeGuidanceLogitsForVisualTokenProcessor(LogitsProcessor):
+
     def __init__(self, vllm_config: "VllmConfig", device: torch.device,
                  is_pin_memory: bool):
         self.device = device
         self.pin_memory = is_pin_memory
         self.visual_token_start_index = 151854
-        self.cfg_batch_size = vllm_config.additional_config.get("cfg_batch_size", 1)
+        self.cfg_batch_size = vllm_config.additional_config.get(
+            "cfg_batch_size", 1)
 
         self.metadata: dict[int, HybridSchedulerMetadata] = {}
-        self.guidance_scale: dict[int, int] = {}
-        self.activated = False
+        self.guidance_scale: dict[int, float] = {}
+
+        # index -> format_token_ids, in_image, in_visual, guidance_scale
+        self.format_dict: dict[int, tuple[Sequence[int], bool, bool,
+                                          float]] = {}
+
+    @staticmethod
+    def add_request(
+        params: SamplingParams,
+        metadata: HybridSchedulerMetadata,
+        cfg_batch_size: int,
+    ) -> Optional[tuple[Sequence[int], bool, bool, float]]:
+        if not getattr(params, "extra_args", None):
+            return None
+        if not metadata:
+            return None
+        guidance_scale = params.extra_args.get("guidance_scale", None)
+        if cfg_batch_size > 1 and guidance_scale is None:
+            return None
+
+        return (metadata.format_token_ids, metadata.in_image,
+                metadata.in_visual, guidance_scale)
 
     def update_state(self, batch_update: Optional[BatchUpdate]):
         if not batch_update:
             return
 
+        need_updated = False
         for index, params, _, _, metadata in batch_update.added:
-            if not getattr(params, "extra_args", None):
-                continue
-            if metadata is None:
-                continue
-            guidance_scale = params.extra_args.get("guidance_scale", None)
-            if self.cfg_batch_size > 1 and guidance_scale is None:
-                continue
-            self.activated = True
-            self.metadata[index] = metadata
-            self.guidance_scale[index] = guidance_scale
+            if (state := self.add_request(params, metadata,
+                                          self.cfg_batch_size)) is not None:
+                self.format_dict[index] = state
+                need_updated = True
+            elif self.format_dict.pop(index, None) is not None:
+                need_updated = True
 
-        if self.activated is True:
+        if self.format_dict:
             for index in batch_update.removed:
-                self.metadata.pop(index, None)
-                self.guidance_scale.pop(index, None)
+                if self.format_dict.pop(index, None):
+                    need_updated = True
 
             for i1, i2, direct in batch_update.moved:
-                if direct == MoveDirectionality.SWAP:
-                    self.metadata[i1], self.metadata[i2] = self.metadata[i2], self.metadata[i1]
-                    self.guidance_scale[i1], self.guidance_scale[i2] = \
-                        self.guidance_scale[i2], self.guidance_scale[i1]
-                if direct == MoveDirectionality.UNIDIRECTIONAL:
-                    self.metadata[i2] = self.metadata.pop(i1, None)
-                    self.guidance_scale[i2] = self.guidance_scale.pop(i1, 1.0)
+                a_entry = self.format_dict.pop(i1, None)
+                b_entry = self.format_dict.pop(i2, None)
+                if a_entry is not None:
+                    self.format_dict[i2] = a_entry
+                    need_updated = True
+                if b_entry is not None:
+                    need_updated = True
+                    if direct == MoveDirectionality.SWAP:
+                        self.format_dict[i1] = b_entry
 
             for index, params, metadata in batch_update.updated:
-                self.metadata[index] = metadata
+                new_state = self.add_request(params, metadata,
+                                             self.cfg_batch_size)
+                old_state = self.format_dict.get(index, None)
+                if old_state != new_state:
+                    need_updated = True
+                    if new_state is not None:
+                        self.format_dict[index] = new_state
+                    else:
+                        self.format_dict.pop(index, None)
+
+        if need_updated:
+            self.metadata = {}
+            self.guidance_scale = {}
+            for index, (format_token_ids, in_image, in_visual,
+                        guidance_scale) in self.format_dict.items():
+                self.metadata[index] = HybridSchedulerMetadata(
+                    format_token_ids=format_token_ids,
+                    in_image=in_image,
+                    in_visual=in_visual,
+                )
+                self.guidance_scale[index] = guidance_scale
 
     def is_argmax_invariant(self) -> bool:
         return True
@@ -330,7 +371,8 @@ class ClassifierFreeGuidanceLogitsForVisualTokenProcessor(LogitsProcessor):
             return logits
 
         indices = list(self.metadata.keys())
-        if logits.shape[0] != len(indices) or logits.shape[0] % self.cfg_batch_size != 0:
+        if logits.shape[0] != len(
+                indices) or logits.shape[0] % self.cfg_batch_size != 0:
             return logits
 
         for i in range(0, len(indices), self.cfg_batch_size):
@@ -343,10 +385,14 @@ class ClassifierFreeGuidanceLogitsForVisualTokenProcessor(LogitsProcessor):
                 mask[format_token_ids] = False
                 logits[i].masked_fill_(mask, float("-inf"))
             elif in_image and in_visual:
-                cond_logits = torch.nn.functional.log_softmax(logits[i], dim=-1)
+                cond_logits = torch.nn.functional.log_softmax(logits[i],
+                                                              dim=-1)
                 if guidance_scale is not None and guidance_scale != 1.0:
-                    uncond_logits = torch.nn.functional.log_softmax(logits[i+1], dim=-1)
-                    guided_logits = uncond_logits + guidance_scale * (cond_logits - uncond_logits)
+                    uncond_logits = torch.nn.functional.log_softmax(logits[i +
+                                                                           1],
+                                                                    dim=-1)
+                    guided_logits = uncond_logits + guidance_scale * (
+                        cond_logits - uncond_logits)
                     logits[i] = guided_logits
                 mask = torch.ones_like(logits[i], dtype=torch.bool)
                 mask[self.visual_token_start_index:] = False

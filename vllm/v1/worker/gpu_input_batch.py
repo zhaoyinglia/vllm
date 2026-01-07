@@ -14,6 +14,7 @@ from vllm.multimodal.inputs import MultiModalFeatureSpec, MultiModalKwargsItems
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.utils import length_from_prompt_token_ids_or_embeds, swap_dict_values
+from vllm.v1.core.sched.batch_manager import HybridSchedulerMetadata
 from vllm.v1.outputs import LogprobsTensors
 from vllm.v1.pool.metadata import PoolingMetadata
 from vllm.v1.sample.logits_processor import (BatchUpdateBuilder,
@@ -23,7 +24,6 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.spec_decode.utils import is_spec_decode_unsupported
 from vllm.v1.utils import copy_slice
 from vllm.v1.worker.block_table import MultiGroupBlockTable
-from vllm.v1.core.sched.batch_manager import HybridSchedulerMetadata
 
 
 @dataclass
@@ -305,7 +305,8 @@ class InputBatch:
             # models, to support logitsprocs.
             self.batch_update_builder.added.append(
                 (new_req_index, request.sampling_params,
-                 request.prompt_token_ids, request.output_token_ids, request.hybrid_metadata))
+                 request.prompt_token_ids, request.output_token_ids,
+                 request.hybrid_metadata))
 
         return new_req_index
 

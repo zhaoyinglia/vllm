@@ -222,13 +222,13 @@ class SiglipMLP(nn.Module):
         self.fc1 = ColumnParallelLinear(
             config.hidden_size,
             config.intermediate_size,
-            quant_config=quant_config, # --- FLAGSCALE MODIFICATION ---
+            quant_config=quant_config,  # --- FLAGSCALE MODIFICATION ---
             prefix=f"{prefix}.fc1",
         )
         self.fc2 = RowParallelLinear(
             config.intermediate_size,
             config.hidden_size,
-            quant_config=quant_config, # --- FLAGSCALE MODIFICATION ---
+            quant_config=quant_config,  # --- FLAGSCALE MODIFICATION ---
             prefix=f"{prefix}.fc2",
         )
 

@@ -1,14 +1,15 @@
-
-
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import enum
+from collections import defaultdict
+from typing import Optional
+
 import msgspec
 import numpy as np
 
-from collections import defaultdict
-
 from vllm.config import VllmConfig
-from vllm.v1.request import Request
 from vllm.logger import init_logger
+from vllm.v1.request import Request
 
 logger = init_logger(__name__)
 
@@ -33,6 +34,7 @@ class HybridSchedulerMetadata(
 
 
 class BatchSchedulerManager:
+
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -44,9 +46,14 @@ class BatchSchedulerManager:
         self.soi = self.additional_config.get("soi_token_id", -1)
         self.eoi = self.additional_config.get("eoi_token_id", -1)
         self.eol = self.additional_config.get("eol_token_id", -1)
-        self.resolution_map = self.additional_config.get("resolution_map", None)
-        assert self.resolution_map is not None, "resolution_map must be provided in additional_config"
-        self.resolution_map_rev = {v: k for k, v in self.resolution_map.items()}
+        self.resolution_map = self.additional_config.get(
+            "resolution_map", None)
+        assert self.resolution_map is not None, (
+            "resolution_map must be provided in additional_config")
+        self.resolution_map_rev = {
+            v: k
+            for k, v in self.resolution_map.items()
+        }
 
         # request_id -> ...
         self.request_metadata: dict[str, HybridSchedulerMetadata] = {}
@@ -74,7 +81,8 @@ class BatchSchedulerManager:
         last_token_id = request.all_token_ids[-1]
 
         req_metadata = self.get_req_metadata(request)
-        assert req_metadata is None, f"Request {req_id} already exists in BatchSchedulerManager"
+        assert req_metadata is None, (
+            f"Request {req_id} already exists in BatchSchedulerManager")
 
         req_metadata = HybridSchedulerMetadata()
         self.request_metadata[req_id] = req_metadata
@@ -86,17 +94,17 @@ class BatchSchedulerManager:
         extra_args = request.sampling_params.extra_args
         self.parse_customized_hw(request, extra_args)
 
-        if last_token_id == self.boi: # 151852
+        if last_token_id == self.boi:  # 151852
             req_metadata.in_image = True
             req_metadata.in_visual = False
             self.boi_token_idx[req_id] = len(request.output_token_ids)
 
-        if last_token_id == self.soi: # 151851
+        if last_token_id == self.soi:  # 151851
             req_metadata.in_image = True
             req_metadata.in_visual = True
             self.soi_token_idx[req_id] = len(request.output_token_ids)
 
-        if last_token_id == self.eoi: # 151853
+        if last_token_id == self.eoi:  # 151853
             req_metadata.in_image = False
             req_metadata.in_visual = False
 
@@ -105,34 +113,44 @@ class BatchSchedulerManager:
             h, w = self.parse_token_hw(request)
 
             assert self.soi_token_idx[req_id] >= 0
-            vis_idx = len(request.output_token_ids) - self.soi_token_idx[req_id]
+            vis_idx = len(
+                request.output_token_ids) - self.soi_token_idx[req_id]
             if vis_idx != 0:
-                if (vis_idx + 1) == h * (w + 1): # the previous token of eoi
-                    req_metadata.format_token_ids = [self.eoi] # 151853
-                elif (vis_idx + 1) % (w + 1) == 0: # the pervious token of eol
-                    req_metadata.format_token_ids = [self.eol] # 151846
+                if (vis_idx + 1) == h * (w + 1):  # the previous token of eoi
+                    req_metadata.format_token_ids = [self.eoi]  # 151853
+                elif (vis_idx + 1) % (w + 1) == 0:  # the pervious token of eol
+                    req_metadata.format_token_ids = [self.eol]  # 151846
 
         # in resolution area of image area
         elif req_metadata.in_image and req_metadata.in_visual is False:
             # 151852
             if len(self.resolution_token_ids[req_id]) > 0:
                 assert self.boi_token_idx[req_id] >= 0
-                hw_idx = len(request.output_token_ids) - self.boi_token_idx[req_id]
+                hw_idx = len(
+                    request.output_token_ids) - self.boi_token_idx[req_id]
                 if hw_idx < len(self.resolution_token_ids[req_id]):
-                    req_metadata.format_token_ids = [self.resolution_token_ids[req_id][hw_idx]]
+                    req_metadata.format_token_ids = [
+                        self.resolution_token_ids[req_id][hw_idx]
+                    ]
                 else:
-                    req_metadata.format_token_ids = [self.soi] # 151851
+                    req_metadata.format_token_ids = [self.soi]  # 151851
 
         if req_metadata.in_image:
-            request.sampling_params.top_k = extra_args.get("visual_top_k", request.sampling_params.top_k)
-            request.sampling_params.top_p = extra_args.get("visual_top_p", request.sampling_params.top_p)
-            request.sampling_params.temperature = extra_args.get("visual_temperature", request.sampling_params.temperature)
+            request.sampling_params.top_k = extra_args.get(
+                "visual_top_k", request.sampling_params.top_k)
+            request.sampling_params.top_p = extra_args.get(
+                "visual_top_p", request.sampling_params.top_p)
+            request.sampling_params.temperature = extra_args.get(
+                "visual_temperature", request.sampling_params.temperature)
         else:
-            request.sampling_params.top_k = extra_args.get("text_top_k", request.sampling_params.top_k)
-            request.sampling_params.top_p = extra_args.get("text_top_p", request.sampling_params.top_p)
-            request.sampling_params.temperature = extra_args.get("text_temperature", request.sampling_params.temperature)
+            request.sampling_params.top_k = extra_args.get(
+                "text_top_k", request.sampling_params.top_k)
+            request.sampling_params.top_p = extra_args.get(
+                "text_top_p", request.sampling_params.top_p)
+            request.sampling_params.temperature = extra_args.get(
+                "text_temperature", request.sampling_params.temperature)
 
-    def reset_request_metadata(self, request: str):
+    def reset_request_metadata(self, request: Request):
 
         req_id = request.request_id
 
@@ -141,7 +159,8 @@ class BatchSchedulerManager:
         self.boi_token_idx.pop(req_id, None)
         self.resolution_token_ids.pop(req_id, None)
 
-    def get_req_metadata(self, request: Request) -> HybridSchedulerMetadata:
+    def get_req_metadata(
+            self, request: Request) -> Optional[HybridSchedulerMetadata]:
         return self.request_metadata.get(request.request_id, None)
 
     def update_metadata_with_output(self, request: Request):
@@ -173,25 +192,32 @@ class BatchSchedulerManager:
 
         extra_args = request.sampling_params.extra_args
         if req_metadata.in_image:
-            request.sampling_params.top_k = extra_args.get("visual_top_k", request.sampling_params.top_k)
-            request.sampling_params.top_p = extra_args.get("visual_top_p", request.sampling_params.top_p)
-            request.sampling_params.temperature = extra_args.get("visual_temperature", request.sampling_params.temperature)
+            request.sampling_params.top_k = extra_args.get(
+                "visual_top_k", request.sampling_params.top_k)
+            request.sampling_params.top_p = extra_args.get(
+                "visual_top_p", request.sampling_params.top_p)
+            request.sampling_params.temperature = extra_args.get(
+                "visual_temperature", request.sampling_params.temperature)
         else:
-            request.sampling_params.top_k = extra_args.get("text_top_k", request.sampling_params.top_k)
-            request.sampling_params.top_p = extra_args.get("text_top_p", request.sampling_params.top_p)
-            request.sampling_params.temperature = extra_args.get("text_temperature", request.sampling_params.temperature)
+            request.sampling_params.top_k = extra_args.get(
+                "text_top_k", request.sampling_params.top_k)
+            request.sampling_params.top_p = extra_args.get(
+                "text_top_p", request.sampling_params.top_p)
+            request.sampling_params.temperature = extra_args.get(
+                "text_temperature", request.sampling_params.temperature)
 
         if req_metadata.in_visual is True:
             h, w = self.parse_token_hw(request)
 
             assert self.soi_token_idx[req_id] >= 0
-            vis_idx = len(request.output_token_ids) - self.soi_token_idx[req_id]
+            vis_idx = len(
+                request.output_token_ids) - self.soi_token_idx[req_id]
             if vis_idx != 0:
-                if (vis_idx + 1) == h * (w + 1): # the previous token of eoi
-                    req_metadata.format_token_ids = [self.eoi] # 151853
+                if (vis_idx + 1) == h * (w + 1):  # the previous token of eoi
+                    req_metadata.format_token_ids = [self.eoi]  # 151853
                     req_metadata.img_step += 1
-                elif (vis_idx + 1) % (w + 1) == 0: # the pervious token of eol
-                    req_metadata.format_token_ids = [self.eol] # 151846
+                elif (vis_idx + 1) % (w + 1) == 0:  # the pervious token of eol
+                    req_metadata.format_token_ids = [self.eol]  # 151846
                 else:
                     req_metadata.format_token_ids = []
 
@@ -200,11 +226,14 @@ class BatchSchedulerManager:
             # 151852
             if len(self.resolution_token_ids[req_id]) > 0:
                 assert self.boi_token_idx[req_id] >= 0
-                hw_idx = len(request.output_token_ids) - self.boi_token_idx[req_id]
+                hw_idx = len(
+                    request.output_token_ids) - self.boi_token_idx[req_id]
                 if hw_idx < len(self.resolution_token_ids[req_id]):
-                    req_metadata.format_token_ids = [self.resolution_token_ids[req_id][hw_idx]]
+                    req_metadata.format_token_ids = [
+                        self.resolution_token_ids[req_id][hw_idx]
+                    ]
                 else:
-                    req_metadata.format_token_ids = [self.soi] # 151851
+                    req_metadata.format_token_ids = [self.soi]  # 151851
 
         return req_metadata
 
@@ -217,17 +246,22 @@ class BatchSchedulerManager:
                 last_tokens = np.array(request.all_token_ids)
             else:
                 last_tokens = np.array(request.all_token_ids[-16:])
-            boi_idx = np.where(last_tokens == self.boi)[0][-1] # 151852
-            img_idx = np.where(last_tokens == self.soi)[0][-1] # 151851
-            self.resolution_token_ids[req_id] = last_tokens[boi_idx+1:img_idx].tolist()
+            boi_idx = np.where(last_tokens == self.boi)[0][-1]  # 151852
+            img_idx = np.where(last_tokens == self.soi)[0][-1]  # 151851
+            self.resolution_token_ids[req_id] = last_tokens[boi_idx +
+                                                            1:img_idx].tolist(
+                                                            )
             del last_tokens
 
         resolution_text = ""
         for token in self.resolution_token_ids[req_id]:
-            assert token in self.resolution_map, f"{self.resolution_token_ids[req_id]} has unknown token {token}"
+            assert token in self.resolution_map, (
+                f"{self.resolution_token_ids[req_id]} has unknown token {token}"
+            )
             resolution_text += self.resolution_map[token]
 
-        assert "*" in resolution_text, f"Invalid resolution text {resolution_text}"
+        assert "*" in resolution_text, (
+            f"Invalid resolution text {resolution_text}")
         height_str, width_str = resolution_text.split("*")
         height = int(height_str.strip())
         width = int(width_str.strip())
@@ -239,22 +273,26 @@ class BatchSchedulerManager:
         area = extra_args.get("area", None)
 
         if len({width is None, height is None, area is None}) != 1:
-            logger.warning("width, height, area should be set simultaneously. Customized resolution is ignored.")
+            logger.warning("width, height, area should be set simultaneously. "
+                           "Customized resolution is ignored.")
             return
 
         if width is None:
             return
 
-        logger.debug(f"Set customized hw: {height} x {width} for request {request.request_id}")
+        logger.debug("Set customized hw: %d x %d"
+                     " for request %s", height, width, request.request_id)
         current_area = height * width
-        target_ratio = int((area / current_area) ** 0.5)
+        target_ratio = int((area / current_area)**0.5)
 
         th = int(height * target_ratio / 16)
         tw = int(width * target_ratio / 16)
         resolution_text = str(th) + "*" + str(tw)
         resolution_tokens = []
         for c in resolution_text:
-            assert c in self.resolution_map_rev, f"Unknown resolution char {c} in customized hw {resolution_text}"
+            assert c in self.resolution_map_rev, (
+                f"Unknown resolution char {c} "
+                f"in customized hw {resolution_text}")
             resolution_tokens.append(self.resolution_map_rev[c])
 
         self.resolution_token_ids[request.request_id] = resolution_tokens

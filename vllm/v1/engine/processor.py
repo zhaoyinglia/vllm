@@ -538,8 +538,10 @@ class Processor:
         prompt_embeds = None
 
         # uncond_prompt_str: Optional[str] = decoder_inputs.get("uncond_prompt")
-        uncond_prompt_token_ids: Optional[list] = decoder_inputs.get("uncond_prompt_token_ids")
-        visual_prompt_token_ids: Optional[list] = decoder_inputs.get("visual_prompt_token_ids")
+        uncond_prompt_token_ids: Optional[list] = decoder_inputs.get(
+            "uncond_prompt_token_ids")
+        visual_prompt_token_ids: Optional[list] = decoder_inputs.get(
+            "visual_prompt_token_ids")
 
         # TODO: can we avoid cloning here in multiproc case?
         sampling_params = params.clone()
@@ -572,8 +574,12 @@ class Processor:
             )
 
         core_reqs = []
-        for token_ids in [prompt_token_ids, uncond_prompt_token_ids, visual_prompt_token_ids]:
-            if token_ids is None: continue
+        for token_ids in [
+                prompt_token_ids, uncond_prompt_token_ids,
+                visual_prompt_token_ids
+        ]:
+            if token_ids is None:
+                continue
             core_reqs.append(create_core_req(token_ids))
 
         return prompt_str, core_reqs

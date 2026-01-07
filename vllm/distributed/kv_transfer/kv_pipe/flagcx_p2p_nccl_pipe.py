@@ -1,32 +1,33 @@
-# Mainly adopted from https://github.com/vllm-project/vllm/blob/1ad957950ffc1552af5abda78c03d88ddb67945b/vllm/distributed/kv_transfer/kv_pipe/p2p_nccl_pipe.py.
-# Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
-import os
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+# yapf: disable
+# ruff: noqa: E501, E402
+# coding=utf-8
+# Mainly adopted from https://github.com/vllm-project/vllm/blob/1ad957950ffc1552af5abda78c03d88ddb67945b/vllm/distributed/kv_transfer/kv_pipe/p2p_nccl_pipe.py.
+import ctypes
 import logging
+import os
+import sys
 import threading
 import time
 import typing
 from collections import deque
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Optional
 
 import msgpack
 import torch
 import zmq
-import ctypes
-import sys
 
 from vllm.config import KVTransferConfig
-
-sys.path.append(os.getenv('FLAGCX_PATH'))
-from plugin.interservice.flagcx_wrapper import (
-    FLAGCXLibrary,
-    buffer_type,
-    cudaStream_t,
-    flagcxComm_t,
-    flagcxDataTypeEnum,
-)
-
 from vllm.utils import current_stream, get_ip
+
+flagcx_path = os.getenv("FLAGCX_PATH", None)
+assert flagcx_path is not None, "FLAGCX_PATH environment variable is not set."
+sys.path.append(flagcx_path)
+from plugin.interservice.flagcx_wrapper import (FLAGCXLibrary, buffer_type,
+                                                flagcxComm_t,
+                                                flagcxDataTypeEnum)
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,9 @@ class P2pNcclPipe:
         self.rank = port_offset
         self.local_rank = local_rank
         self.device = torch.device(f"cuda:{self.local_rank}")
-        flagcx_path = os.getenv('FLAGCX_PATH')
-        library_path=os.path.join(flagcx_path, "build/lib/libflagcx.so")
+        flagcx_path = os.getenv('FLAGCX_PATH', None)
+        assert flagcx_path is not None, "FLAGCX_PATH environment variable is not set."
+        library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
         self.flagcx = FLAGCXLibrary(library_path)
 
         if not hostname:
@@ -85,28 +87,28 @@ class P2pNcclPipe:
 
         self.send_stream = torch.cuda.Stream()
         self.recv_stream = torch.cuda.Stream()
-        # use a map to store {torch stream: flagcx stream} 
-        self.flagcx_streams = {}
+        # use a map to store {torch stream: flagcx stream}
+        self.flagcx_streams: dict[torch.cuda.Stream, Any] = {}
 
         # The sending type includes tree mutually exclusive options:
         # PUT, GET, PUT_ASYNC.
         self.send_type = self.config.get_from_extra_config("send_type", "PUT")
         if self.send_type == "GET":
-            self.send_store: Dict[str,
+            self.send_store: dict[str,
                                   torch.Tensor] = {}  # tensor_id: torch.Tensor
         else:
             # PUT or PUT_ASYNC
-            self.send_queue: Deque[
-                List[Any]] = deque()  # tensor_id: torch.Tensor
+            self.send_queue: deque[
+                list[Any]] = deque()  # tensor_id: torch.Tensor
             if self.send_type == "PUT_ASYNC":
                 self._send_thread = threading.Thread(target=self._send_async,
                                                      daemon=True)
                 self._send_thread.start()
 
-        self.recv_store: Dict[str,
+        self.recv_store: dict[str,
                               torch.Tensor] = {}  # tensor_id: torch.Tensor
-        self.socks: Dict[str, Any] = {}  # remote_address: client socket
-        self.comms: Dict[str, Any] = {}  # remote_address: (ncclComm_t, rank)
+        self.socks: dict[str, Any] = {}  # remote_address: client socket
+        self.comms: dict[str, Any] = {}  # remote_address: (ncclComm_t, rank)
 
         self.buffer_size = 0
         self.buffer_size_threshold = self.config.kv_buffer_size
@@ -448,9 +450,10 @@ class P2pNcclPipe:
 
         with torch.cuda.stream(stream):
             flagcx_stream = self._get_or_create_flagcx_stream(stream)
-            self.flagcx.flagcxSend(buffer_type(tensor.data_ptr()), tensor.numel(),
-                                   flagcxDataTypeEnum.from_torch(tensor.dtype), dst,
-                                   comm, flagcx_stream)
+            self.flagcx.flagcxSend(buffer_type(tensor.data_ptr()),
+                                   tensor.numel(),
+                                   flagcxDataTypeEnum.from_torch(tensor.dtype),
+                                   dst, comm, flagcx_stream)
 
     def _recv(self, comm, tensor: torch.Tensor, src: int, stream=None):
         assert tensor.device == self.device, (
@@ -461,9 +464,10 @@ class P2pNcclPipe:
 
         with torch.cuda.stream(stream):
             flagcx_stream = self._get_or_create_flagcx_stream(stream)
-            self.flagcx.flagcxRecv(buffer_type(tensor.data_ptr()), tensor.numel(),
-                                   flagcxDataTypeEnum.from_torch(tensor.dtype), src,
-                                   comm, flagcx_stream)
+            self.flagcx.flagcxRecv(buffer_type(tensor.data_ptr()),
+                                   tensor.numel(),
+                                   flagcxDataTypeEnum.from_torch(tensor.dtype),
+                                   src, comm, flagcx_stream)
 
     def close(self) -> None:
         self._listener_thread.join()

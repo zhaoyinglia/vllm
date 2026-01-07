@@ -243,7 +243,9 @@ class LLMEngine:
             assert n == 1, "Unconditional generation does not support n > 1."
             assert len(request) > 1
 
-            parent_req = ParentRequest(f"cfg_{request_id}", params, num_child_request=len(request))
+            parent_req = ParentRequest(f"cfg_{request_id}",
+                                       params,
+                                       num_child_request=len(request))
             for idx, req in enumerate(request):
                 request_id, params = parent_req.get_child_info(idx)
                 child_request = req if idx == len(request) - 1 else copy(req)

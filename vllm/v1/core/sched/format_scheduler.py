@@ -19,9 +19,12 @@ from vllm.distributed.kv_transfer.kv_connector.v1.metrics import (
     KVConnectorStats)
 from vllm.logger import init_logger
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
+from vllm.sampling_params import SamplingParams
 from vllm.v1.core.encoder_cache_manager import (EncoderCacheManager,
                                                 compute_encoder_budget)
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
+from vllm.v1.core.sched.batch_manager import (BatchSchedulerManager,
+                                              HybridSchedulerMetadata)
 from vllm.v1.core.sched.interface import SchedulerInterface
 from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
                                        SchedulerOutput)
@@ -36,8 +39,6 @@ from vllm.v1.outputs import DraftTokenIds, KVConnectorOutput, ModelRunnerOutput
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.spec_decode.metrics import SpecDecodingStats
 from vllm.v1.structured_output import StructuredOutputManager
-from vllm.sampling_params import SamplingParams
-from vllm.v1.core.sched.batch_manager import BatchSchedulerManager, HybridSchedulerMetadata
 
 logger = init_logger(__name__)
 
@@ -691,7 +692,7 @@ class Scheduler(SchedulerInterface):
         new_block_ids: list[Optional[tuple[list[int], ...]]] = []
         num_computed_tokens: list[int] = []
         sampling_params: list[SamplingParams] = []
-        hybrid_metadata: list[HybridSchedulerMetadata] = []
+        hybrid_metadata: list[Optional[HybridSchedulerMetadata]] = []
 
         use_connector = self.connector is not None
         for req in itertools.chain(running_reqs, resumed_reqs):

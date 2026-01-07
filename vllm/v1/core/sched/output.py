@@ -19,8 +19,8 @@ if TYPE_CHECKING:
     from vllm.multimodal.inputs import MultiModalFeatureSpec
     from vllm.pooling_params import PoolingParams
     from vllm.sampling_params import SamplingParams
-    from vllm.v1.request import Request
     from vllm.v1.core.sched.batch_manager import HybridSchedulerMetadata
+    from vllm.v1.request import Request
 
 
 @bc_linter_include
@@ -105,8 +105,8 @@ class CachedRequestData:
     new_token_ids: list[list[int]]
     new_block_ids: list[Optional[tuple[list[int], ...]]]
     num_computed_tokens: list[int]
-    sampling_params: Optional[list[SamplingParams]]=None
-    hybrid_metadata: Optional[list[HybridSchedulerMetadata]]=None
+    sampling_params: Optional[list[SamplingParams]] = None
+    hybrid_metadata: Optional[list[Optional[HybridSchedulerMetadata]]] = None
 
     @property
     def num_reqs(self) -> int:

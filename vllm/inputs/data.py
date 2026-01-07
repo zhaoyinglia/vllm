@@ -88,7 +88,7 @@ class TokensPrompt(TypedDict):
     Optional cache salt to be used for prefix caching.
     """
 
-    uncond_prompt_token_ids: NotRequired[Optional[list[int]]]
+    uncond_prompt_token_ids: NotRequired[list[int]]
     """A list of token IDs to pass to the model for the uncond input."""
 
 
@@ -221,8 +221,8 @@ class TokenInputs(TypedDict):
     Optional cache salt to be used for prefix caching.
     """
 
-    uncond_prompt_token_ids: NotRequired[Optional[list[int]]]
-    uncond_prompt: NotRequired[Optional[str]]
+    uncond_prompt_token_ids: NotRequired[list[int]]
+    uncond_prompt: NotRequired[str]
 
 
 def token_inputs(
@@ -234,11 +234,12 @@ def token_inputs(
 ) -> TokenInputs:
     """Construct [`TokenInputs`][vllm.inputs.data.TokenInputs] from optional
     values."""
-    inputs = TokenInputs(type="token", prompt_token_ids=prompt_token_ids,
-                         uncond_prompt_token_ids=uncond_prompt_token_ids)
+    inputs = TokenInputs(type="token", prompt_token_ids=prompt_token_ids)
 
     if prompt is not None:
         inputs["prompt"] = prompt
+    if uncond_prompt_token_ids is not None:
+        inputs["uncond_prompt_token_ids"] = uncond_prompt_token_ids
     if uncond_prompt is not None:
         inputs["uncond_prompt"] = uncond_prompt
     if cache_salt is not None:

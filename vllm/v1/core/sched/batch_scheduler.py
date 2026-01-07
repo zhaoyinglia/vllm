@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+# ruff: noqa: E501
 from __future__ import annotations
 
 import itertools
@@ -19,9 +20,12 @@ from vllm.distributed.kv_transfer.kv_connector.v1.metrics import (
     KVConnectorStats)
 from vllm.logger import init_logger
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
+from vllm.sampling_params import SamplingParams
 from vllm.v1.core.encoder_cache_manager import (EncoderCacheManager,
                                                 compute_encoder_budget)
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
+from vllm.v1.core.sched.batch_manager import (BatchSchedulerManager,
+                                              HybridSchedulerMetadata)
 from vllm.v1.core.sched.interface import SchedulerInterface
 from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
                                        SchedulerOutput)
@@ -36,8 +40,6 @@ from vllm.v1.outputs import DraftTokenIds, KVConnectorOutput, ModelRunnerOutput
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.spec_decode.metrics import SpecDecodingStats
 from vllm.v1.structured_output import StructuredOutputManager
-from vllm.sampling_params import SamplingParams
-from vllm.v1.core.sched.batch_manager import BatchSchedulerManager, HybridSchedulerMetadata
 
 logger = init_logger(__name__)
 
@@ -217,7 +219,8 @@ class Scheduler(SchedulerInterface):
 
             batch_num_new_tokens = []
             self.batch_manager.start_new_batch()
-            while req_index < len(self.running) and self.batch_manager.remaining_slots() > 0:
+            while req_index < len(
+                    self.running) and self.batch_manager.remaining_slots() > 0:
                 request = self.running[req_index]
                 req_index += 1
 
@@ -270,48 +273,50 @@ class Scheduler(SchedulerInterface):
             if not batch_requests:
                 continue
 
-            if not all(self.batch_manager.is_valid) is True:
+            if all(self.batch_manager.is_valid) is not True:
                 continue
 
             can_schedule = True
             batch_new_blocks = []
-            for request, num_new_tokens in zip(batch_requests, batch_num_new_tokens):
+            for request, num_new_tokens in zip(batch_requests,
+                                               batch_num_new_tokens):
                 new_blocks = self.kv_cache_manager.allocate_slots(
                     request,
                     num_new_tokens,
                     num_lookahead_tokens=self.num_lookahead_tokens)
-                if new_blocks is None:
-                    can_schedule = False
-                    # # The request cannot be scheduled.
-                    # # Preempt the lowest-priority request.
-                    # if self.policy == SchedulingPolicy.PRIORITY:
-                    #     preempted_req = max(
-                    #         self.running,
-                    #         key=lambda r: (r.priority, r.arrival_time),
-                    #     )
-                    #     self.running.remove(preempted_req)
-                    #     if preempted_req in scheduled_running_reqs:
-                    #         scheduled_running_reqs.remove(preempted_req)
-                    # else:
-                    #     preempted_req = self.running.pop()
+                can_schedule = new_blocks is not None
+                # if new_blocks is None:
+                #     # The request cannot be scheduled.
+                #     # Preempt the lowest-priority request.
+                #     if self.policy == SchedulingPolicy.PRIORITY:
+                #         preempted_req = max(
+                #             self.running,
+                #             key=lambda r: (r.priority, r.arrival_time),
+                #         )
+                #         self.running.remove(preempted_req)
+                #         if preempted_req in scheduled_running_reqs:
+                #             scheduled_running_reqs.remove(preempted_req)
+                #     else:
+                #         preempted_req = self.running.pop()
 
-                    # self.kv_cache_manager.free(preempted_req)
-                    # self.encoder_cache_manager.free(preempted_req)
-                    # preempted_req.status = RequestStatus.PREEMPTED
-                    # preempted_req.num_computed_tokens = 0
-                    # if self.log_stats:
-                    #     preempted_req.record_event(
-                    #         EngineCoreEventType.PREEMPTED, scheduled_timestamp)
+                #     self.kv_cache_manager.free(preempted_req)
+                #     self.encoder_cache_manager.free(preempted_req)
+                #     preempted_req.status = RequestStatus.PREEMPTED
+                #     preempted_req.num_computed_tokens = 0
+                #     if self.log_stats:
+                #         preempted_req.record_event(
+                #             EngineCoreEventType.PREEMPTED, scheduled_timestamp)
 
-                    # self.waiting.prepend_request(preempted_req)
-                    # preempted_reqs.append(preempted_req)
-                    # if preempted_req == request:
-                    #     # No more request to preempt.
-                    #     can_schedule = False
-                    #     break
-                else:
-                    # The request can be scheduled.
-                    can_schedule = True
+                #     self.waiting.prepend_request(preempted_req)
+                #     preempted_reqs.append(preempted_req)
+                #     if preempted_req == request:
+                #         # No more request to preempt.
+                #         can_schedule = False
+                #         break
+                # else:
+                #     # The request can be scheduled.
+                #     can_schedule = True
+                #     break
 
                 batch_new_blocks.append(new_blocks)
 
@@ -331,7 +336,8 @@ class Scheduler(SchedulerInterface):
                 break
             assert new_blocks is not None
 
-            for request, num_new_tokens, new_blocks in zip(batch_requests, batch_num_new_tokens, batch_new_blocks):
+            for request, num_new_tokens, new_blocks in zip(
+                    batch_requests, batch_num_new_tokens, batch_new_blocks):
                 # Schedule the request.
                 scheduled_running_reqs.append(request)
                 req_to_new_blocks[request.request_id] = new_blocks
@@ -377,10 +383,12 @@ class Scheduler(SchedulerInterface):
                 if len(self.running) == self.max_num_running_reqs:
                     break
 
-                if len(self.waiting) % self.batch_manager.batch_size != 0: break
+                if len(self.waiting) % self.batch_manager.batch_size != 0:
+                    break
 
                 self.batch_manager.start_new_batch()
-                while self.waiting and self.batch_manager.remaining_slots() > 0:
+                while self.waiting and self.batch_manager.remaining_slots(
+                ) > 0:
                     if len(self.running) == self.max_num_running_reqs:
                         break
 
@@ -413,8 +421,9 @@ class Scheduler(SchedulerInterface):
                     # Check that adding the request still respects the max_loras
                     # constraint.
                     if (self.lora_config and request.lora_request and
-                        (len(scheduled_loras) == self.lora_config.max_loras and
-                        request.lora_request.lora_int_id not in scheduled_loras)):
+                        (len(scheduled_loras) == self.lora_config.max_loras
+                         and request.lora_request.lora_int_id
+                         not in scheduled_loras)):
                         is_valid = False
 
                     self.batch_manager.add_request(request, is_valid)
@@ -424,13 +433,13 @@ class Scheduler(SchedulerInterface):
                 if not batch_requests:
                     continue
 
-                if not all(self.batch_manager.is_valid) is True:
+                if all(self.batch_manager.is_valid) is not True:
                     for req in batch_requests:
                         skipped_waiting_requests.appendleft(req)
                         self.batch_manager.reset_request_metadata(req)
                     continue
 
-                batch_valid = 2 # 2-valid, 1-continue wait, 0-break
+                batch_valid = 2  # 2-valid, 1-continue wait, 0-break
                 batch_info = []
                 for request in batch_requests:
                     num_external_computed_tokens = 0
@@ -483,10 +492,10 @@ class Scheduler(SchedulerInterface):
                         # `request.num_prompt_tokens` to consider the resumed
                         # requests, which have output tokens.
                         num_new_tokens = request.num_tokens - num_computed_tokens
-                        if (0 < self.scheduler_config.long_prefill_token_threshold
-                                < num_new_tokens):
-                            num_new_tokens = (
-                                self.scheduler_config.long_prefill_token_threshold)
+                        if (0 < self.scheduler_config.
+                                long_prefill_token_threshold < num_new_tokens):
+                            num_new_tokens = (self.scheduler_config.
+                                              long_prefill_token_threshold)
 
                         # chunked prefill has to be enabled explicitly to allow
                         # pooling requests to be chunked
@@ -518,9 +527,9 @@ class Scheduler(SchedulerInterface):
                     # extra block gets allocated which
                     # creates a mismatch between the number
                     # of local and remote blocks.
-                    effective_lookahead_tokens = (0 if request.num_computed_tokens
-                                                  == 0 else
-                                                  self.num_lookahead_tokens)
+                    effective_lookahead_tokens = (
+                        0 if request.num_computed_tokens == 0 else
+                        self.num_lookahead_tokens)
 
                     # Determine if we need to allocate cross-attention blocks.
                     if self.is_encoder_decoder and request.has_encoder_inputs:
@@ -586,7 +595,8 @@ class Scheduler(SchedulerInterface):
 
                 assert len(batch_requests) == len(batch_info)
 
-                for request, (num_new_tokens, num_computed_tokens) in zip(batch_requests, batch_info):
+                for request, (num_new_tokens, num_computed_tokens) in zip(
+                        batch_requests, batch_info):
                     self.running.append(request)
                     if self.log_stats:
                         request.record_event(EngineCoreEventType.SCHEDULED,
@@ -769,7 +779,7 @@ class Scheduler(SchedulerInterface):
         new_block_ids: list[Optional[tuple[list[int], ...]]] = []
         num_computed_tokens: list[int] = []
         sampling_params: list[SamplingParams] = []
-        hybrid_metadata: list[HybridSchedulerMetadata] = []
+        hybrid_metadata: list[Optional[HybridSchedulerMetadata]] = []
 
         use_connector = self.connector is not None
         for req in itertools.chain(running_reqs, resumed_reqs):
@@ -989,7 +999,7 @@ class Scheduler(SchedulerInterface):
         assert len(self.running) % self.batch_manager.batch_size == 0
         for i in range(0, len(self.running), self.batch_manager.batch_size):
 
-            request, uncond_request = self.running[i], self.running[i+1]
+            request, uncond_request = self.running[i], self.running[i + 1]
 
             req_id = request.request_id
             num_tokens_scheduled = num_scheduled_tokens.get(req_id, 0)
@@ -1019,14 +1029,16 @@ class Scheduler(SchedulerInterface):
 
             stopped = False
             new_logprobs = None
-            new_token_ids, uncond_new_token_ids = generated_token_ids, []
+            new_token_ids = generated_token_ids
+            uncond_new_token_ids: list[int] = []
             kv_transfer_params, uncond_kv_transfer_params = None, None
             status_before_stop = request.status
 
             # Check for stop and update request status.
             if new_token_ids:
                 new_token_ids, uncond_new_token_ids, stopped = self._update_request_with_output(
-                    request, uncond_request, new_token_ids, uncond_new_token_ids)
+                    request, uncond_request, new_token_ids,
+                    uncond_new_token_ids)
 
             # Stop checking for pooler models.
             pooler_output = None
@@ -1051,8 +1063,7 @@ class Scheduler(SchedulerInterface):
             for req, params, token_ids in zip(
                 (request, uncond_request),
                 (kv_transfer_params, uncond_kv_transfer_params),
-                (new_token_ids, uncond_new_token_ids)
-            ):
+                (new_token_ids, uncond_new_token_ids)):
                 inner_req_id = req.request_id
                 # Extract sample logprobs if needed.
                 if req.sampling_params is not None \
@@ -1073,7 +1084,8 @@ class Scheduler(SchedulerInterface):
                     req.num_nans_in_logits = num_nans_in_logits[inner_req_id]
 
                 # Get prompt logprobs for this request.
-                prompt_logprobs_tensors = prompt_logprobs_dict.get(inner_req_id)
+                prompt_logprobs_tensors = prompt_logprobs_dict.get(
+                    inner_req_id)
                 if token_ids or pooler_output is not None \
                     or params:
 
@@ -1145,7 +1157,7 @@ class Scheduler(SchedulerInterface):
         uncond_request: Request,
         new_token_ids: list[int],
         uncond_new_token_ids: list[int],
-    ) -> tuple[list[int], bool]:
+    ) -> tuple[list[int], list[int], bool]:
         # Append generated tokens and check for stop. Note that if
         # a request is still being prefilled, we expect the model runner
         # to return empty token ids for the request.
