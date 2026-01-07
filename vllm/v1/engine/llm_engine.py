@@ -4,7 +4,7 @@
 import time
 from collections.abc import Mapping
 from copy import copy
-from typing import Any, Callable, Optional, Union, cast
+from typing import Any, Callable, Optional, Union
 
 import torch.nn as nn
 from typing_extensions import TypeVar
@@ -27,7 +27,6 @@ from vllm.transformers_utils.tokenizer import (AnyTokenizer,
                                                init_tokenizer_from_configs)
 from vllm.usage.usage_lib import UsageContext
 from vllm.utils import Device
-from vllm.v1.engine import EngineCoreRequest
 from vllm.v1.engine.core_client import EngineCoreClient
 from vllm.v1.engine.output_processor import OutputProcessor
 from vllm.v1.engine.parallel_sampling import ParentRequest
@@ -230,7 +229,7 @@ class LLMEngine:
         # Process raw inputs into the request.
         in_hybrid_mode = "uncond_prompt_token_ids" in prompt
         if in_hybrid_mode:
-            prompt_str, request = self.processor.process_hybrid_inputs(
+            prompt_str, requests = self.processor.process_hybrid_inputs(
                 request_id, prompt, params, arrival_time, lora_request,
                 tokenization_kwargs, trace_headers, priority)
         else:
@@ -241,20 +240,15 @@ class LLMEngine:
         n = params.n if isinstance(params, SamplingParams) else 1
 
         if in_hybrid_mode:
-            request = cast(list[EngineCoreRequest], request)
-        else:
-            request = cast(EngineCoreRequest, request)
-
-        if in_hybrid_mode:
             assert n == 1, "Unconditional generation does not support n > 1."
-            assert len(request) > 1
+            assert len(requests) > 1
 
             parent_req = ParentRequest(f"cfg_{request_id}",
                                        params,
-                                       num_child_request=len(request))
-            for idx, req in enumerate(request):
+                                       num_child_request=len(requests))
+            for idx, req in enumerate(requests):
                 request_id, params = parent_req.get_child_info(idx)
-                child_request = req if idx == len(request) - 1 else copy(req)
+                child_request = req if idx == len(requests) - 1 else copy(req)
                 child_request.request_id = request_id
                 child_request.sampling_params = params
 
