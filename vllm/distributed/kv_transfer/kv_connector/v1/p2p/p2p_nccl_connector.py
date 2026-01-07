@@ -13,12 +13,16 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorBase_V1, KVConnectorMetadata, KVConnectorRole)
 
 # --- FLAGSCALE MODIFICATION BEG ---
-if os.getenv("USE_FLAGCX", "false").lower() in ("1", "true"):
-    from vllm.distributed.kv_transfer.kv_connector.v1.p2p.flagcx_p2p_nccl_engine import (
+if TYPE_CHECKING:
+    from vllm.distributed.kv_transfer.kv_connector.v1.p2p.p2p_nccl_engine import (  # noqa: E501
         P2pNcclEngine)
 else:
-    from vllm.distributed.kv_transfer.kv_connector.v1.p2p.p2p_nccl_engine import (
-        P2pNcclEngine)
+    if os.getenv("USE_FLAGCX", "false").lower() in ("1", "true"):
+        from vllm.distributed.kv_transfer.kv_connector.v1.p2p.flagcx_p2p_nccl_engine import (  # noqa: E501
+            P2pNcclEngine)
+    else:
+        from vllm.distributed.kv_transfer.kv_connector.v1.p2p.p2p_nccl_engine import (  # noqa: E501
+            P2pNcclEngine)
 # --- FLAGSCALE MODIFICATION END ---
 
 from vllm.distributed.parallel_state import get_world_group
