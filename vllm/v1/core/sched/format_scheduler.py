@@ -511,9 +511,8 @@ class Scheduler(SchedulerInterface):
 
                 req_index += 1
                 self.running.append(request)
-                have_metadata = (
-                    self.batch_manager.get_req_metadata(request) is not None
-                )
+                have_metadata = (self.batch_manager.get_req_metadata(request)
+                                 is not None)
                 if not have_metadata:
                     self.batch_manager.set_request_metadata(request)
                 if self.log_stats:

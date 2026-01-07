@@ -334,11 +334,11 @@ class Scheduler(SchedulerInterface):
                     self.waiting.prepend_request(preempted_req)
                     preempted_reqs.append(preempted_req)
                 break
-            assert new_blocks is not None
 
             for request, num_new_tokens, new_blocks in zip(
                     batch_requests, batch_num_new_tokens, batch_new_blocks):
                 # Schedule the request.
+                assert new_blocks is not None
                 scheduled_running_reqs.append(request)
                 req_to_new_blocks[request.request_id] = new_blocks
                 num_scheduled_tokens[request.request_id] = num_new_tokens
@@ -435,7 +435,7 @@ class Scheduler(SchedulerInterface):
 
                 if all(self.batch_manager.is_valid) is not True:
                     for req in batch_requests:
-                        skipped_waiting_requests.appendleft(req)
+                        skipped_waiting_requests.prepend_request(req)
                         self.batch_manager.reset_request_metadata(req)
                     continue
 

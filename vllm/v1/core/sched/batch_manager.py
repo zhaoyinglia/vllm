@@ -91,7 +91,9 @@ class BatchSchedulerManager:
         self.soi_token_idx[req_id] = -1
         self.boi_token_idx[req_id] = -1
 
-        extra_args = request.sampling_params.extra_args
+        assert request.sampling_params is not None, (
+            "sampling_params must be set in request")
+        extra_args = request.sampling_params.get("extra_args", {})
         self.parse_customized_hw(request, extra_args)
 
         if last_token_id == self.boi:  # 151852
@@ -190,7 +192,10 @@ class BatchSchedulerManager:
             req_metadata.in_visual = False
             self.soi_token_idx[req_id] = -1
 
-        extra_args = request.sampling_params.extra_args
+        assert request.sampling_params is not None, (
+            "sampling_params must be set in request")
+        extra_args = request.sampling_params.get("extra_args", {})
+        self.parse_customized_hw(request, extra_args)
         if req_metadata.in_image:
             request.sampling_params.top_k = extra_args.get(
                 "visual_top_k", request.sampling_params.top_k)

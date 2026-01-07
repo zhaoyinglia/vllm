@@ -469,7 +469,7 @@ class Processor:
         trace_headers: Optional[Mapping[str, str]] = None,
         priority: int = 0,
         data_parallel_rank: Optional[int] = None,
-    ) -> tuple[Optional[str], EngineCoreRequest]:
+    ) -> tuple[Optional[str], list[EngineCoreRequest]]:
 
         # TODO(woosuk): Support pooling models.
         self._validate_lora(lora_request)

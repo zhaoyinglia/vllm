@@ -296,7 +296,7 @@ class ClassifierFreeGuidanceLogitsForVisualTokenProcessor(LogitsProcessor):
     @staticmethod
     def add_request(
         params: SamplingParams,
-        metadata: HybridSchedulerMetadata,
+        metadata: Optional[HybridSchedulerMetadata],
         cfg_batch_size: int,
     ) -> Optional[tuple[Sequence[int], bool, bool, float]]:
         if not getattr(params, "extra_args", None):
