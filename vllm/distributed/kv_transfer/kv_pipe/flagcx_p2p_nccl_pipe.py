@@ -27,7 +27,8 @@ assert flagcx_path is not None, "FLAGCX_PATH environment variable is not set."
 sys.path.append(flagcx_path)
 from plugin.interservice.flagcx_wrapper import (FLAGCXLibrary, buffer_type,
                                                 flagcxComm_t,
-                                                flagcxDataTypeEnum)
+                                                flagcxDataTypeEnum,
+                                                flagcxStream_t)
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ class P2pNcclPipe:
         self.send_stream = torch.cuda.Stream()
         self.recv_stream = torch.cuda.Stream()
         # use a map to store {torch stream: flagcx stream}
-        self.flagcx_streams: dict[torch.cuda.Stream, Any] = {}
+        self.flagcx_streams: dict[torch.cuda.Stream, flagcxStream_t] = {}
 
         # The sending type includes tree mutually exclusive options:
         # PUT, GET, PUT_ASYNC.
