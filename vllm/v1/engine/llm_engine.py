@@ -229,7 +229,7 @@ class LLMEngine:
         # Process raw inputs into the request.
         in_hybrid_mode = "uncond_prompt_token_ids" in prompt
         if in_hybrid_mode:
-            prompt_str, request = self.processor.process_hybrid_inputs(
+            prompt_str, requests = self.processor.process_hybrid_inputs(
                 request_id, prompt, params, arrival_time, lora_request,
                 tokenization_kwargs, trace_headers, priority)
         else:
@@ -241,14 +241,14 @@ class LLMEngine:
 
         if in_hybrid_mode:
             assert n == 1, "Unconditional generation does not support n > 1."
-            assert len(request) > 1
+            assert len(requests) > 1
 
             parent_req = ParentRequest(f"cfg_{request_id}",
                                        params,
-                                       num_child_request=len(request))
-            for idx, req in enumerate(request):
+                                       num_child_request=len(requests))
+            for idx, req in enumerate(requests):
                 request_id, params = parent_req.get_child_info(idx)
-                child_request = req if idx == len(request) - 1 else copy(req)
+                child_request = req if idx == len(requests) - 1 else copy(req)
                 child_request.request_id = request_id
                 child_request.sampling_params = params
 
