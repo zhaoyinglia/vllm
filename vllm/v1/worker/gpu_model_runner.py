@@ -654,8 +654,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             req_state.num_computed_tokens = num_computed_tokens
 
             # NOTE(zhaoyinglia): emu must use token_ids from schdeuled_output
-            if not is_last_rank or getattr(req_data, 'hybrid_metadata',
-                                           None) is not None:
+            if not is_last_rank or hybrid_metadata is not None:
                 # When using PP, the scheduler sends the sampled tokens back,
                 # because there's no direct communication between the first-
                 # stage worker and the last-stage worker.
